@@ -18,9 +18,9 @@ app.use(cookieParser());
 
 app.use(cors({
     origin: "https://nendoshop.onrender.com",
-    credentials: true
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE"]
 }));
-
 mongoose.connect(process.env.MONGO_URI)
 .then(() => {
     console.log("Mongo conectado");
