@@ -4,6 +4,8 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const authRoutes = require("./routes/authRoutes");
 
+const PORT = process.env.PORT || 4000;
+
 
 
 require("dotenv").config();
@@ -30,6 +32,8 @@ app.use("/api/configs", require("./routes/configRoutes"));
 app.use("/api/users",require("./routes/userRoutes"))
 app.use("/api/auth", authRoutes);
 
-app.listen(4000, () => {
-    console.log("Servidor corriendo");
+
+
+app.listen(PORT, () => {
+  console.log("Servidor corriendo en puerto " + PORT);
 });
