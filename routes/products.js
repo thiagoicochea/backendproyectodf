@@ -4,7 +4,7 @@ const router = express.Router();
 const Product = require("../models/Product");
 const verifyToken = require("../middlewares/verifyToken");
 
-router.get("/",verifyToken, async (req, res) => {
+router.get("/", async (req, res) => {
 
     const products = await Product.find();
 
@@ -12,7 +12,7 @@ router.get("/",verifyToken, async (req, res) => {
 
 });
 
-router.get("/:id",verifyToken, async (req, res) => {
+router.get("/:id", async (req, res) => {
 
     const product = await Product.findById(req.params.id);
 
@@ -20,7 +20,7 @@ router.get("/:id",verifyToken, async (req, res) => {
 
 });
 
-router.post("/:id/comments", verifyToken, async (req, res) => {
+router.post("/:id/comments", async (req, res) => {
   try {
     const { text, rating, user } = req.body;
 
