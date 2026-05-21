@@ -12,13 +12,33 @@ router.get("/", verifyToken, isAdmin, async (req, res) => {
 });
 
 router.patch("/:id/email", verifyToken, isAdmin, async (req, res) => {
-  const user = await User.findByIdAndUpdate(
-    req.params.id,
-    { email: req.body.email },
-    { new: true }
-  );
+  try {
+    const email = req.body.email;
 
-  res.json(user);
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: "Email inválido" });
+    }
+
+    const exists = await User.findOne({
+      email,
+      _id: { $ne: req.params.id }
+    });
+
+    if (exists) {
+      return res.status(409).json({ message: "Email ya registrado" });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { email },
+      { new: true }
+    );
+
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ message: "Error servidor" });
+  }
 });
 
 router.patch("/:id/phone", verifyToken, isAdmin, async (req, res) => {
