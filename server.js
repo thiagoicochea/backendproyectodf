@@ -27,7 +27,9 @@ mongoose.connect(process.env.MONGO_URI)
     console.log("Mongo conectado");
 });
 
-app.use("/api/payments",require("./routes/payments"))
+app.use("/api/admin/payments",require("./routes/payments"))
+app.use("/api/admin/clients", require("./routes/adminClients"));
+app.use("/api/admin/products", require("./routes/adminProducts"));
 app.use("/api/products", require("./routes/products"));
 app.use("/api/configs", require("./routes/configRoutes"));
 app.use("/api/users",require("./routes/userRoutes"))
