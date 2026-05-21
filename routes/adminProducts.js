@@ -61,17 +61,6 @@ router.patch("/:id/discount", verifyToken, isAdmin, async (req, res) => {
 });
 
 
-router.patch("/:id/password", async (req, res) => {
 
-  const hashed = await bcrypt.hash(req.body.password, 10);
-
-  const client = await Client.findByIdAndUpdate(
-    req.params.id,
-    { password: hashed },
-    { new: true }
-  );
-
-  res.json({ message: "Password updated" });
-});
 
 module.exports = router;
