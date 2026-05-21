@@ -50,4 +50,14 @@ router.patch("/:id/description", verifyToken, isAdmin, async (req, res) => {
   res.json(product);
 });
 
+router.patch("/:id/discount", verifyToken, isAdmin, async (req, res) => {
+  const product = await Product.findByIdAndUpdate(
+    req.params.id,
+    { discount: req.body.discount },
+    { new: true }
+  );
+
+  res.json(product);
+});
+
 module.exports = router;
