@@ -130,6 +130,12 @@ router.post("/:id/comments", async (req, res) => {
   try {
     const { text, rating, user } = req.body;
 
+    console.log("[COMMENTS] incoming comment", {
+      productId: req.params.id,
+      user,
+      text: text?.slice(0, 100)
+    });
+
     if (!text || !text.trim()) {
       return res.status(400).json({ message: "El comentario no puede estar vacío" });
     }
@@ -146,6 +152,11 @@ router.post("/:id/comments", async (req, res) => {
     );
     const groqKey = extractGroqKey(apiConfig?.value);
 
+    console.log("[COMMENTS] groq config", {
+      value: apiConfig?.value,
+      extractedKey: groqKey ? `${groqKey.slice(0, 10)}...` : null
+    });
+
     if (!groqKey) {
       return res.status(500).json({ message: "No hay clave de Groq configurada" });
     }
@@ -153,10 +164,12 @@ router.post("/:id/comments", async (req, res) => {
     let moderation;
 
     try {
+      console.log("[COMMENTS] calling Groq moderation");
       moderation = await moderateCommentWithGroq(groqKey, text);
+      console.log("[COMMENTS] groq result", moderation);
     } catch (error) {
       console.error("Moderation error:", error);
-      return res.status(500).json({ message: "Error al verificar el comentario" });
+      return res.status(500).json({ message: "Error al verificar el comentario: " + (error.message || "error de Groq") });
     }
 
     if (!moderation.allowed || moderation.block) {
