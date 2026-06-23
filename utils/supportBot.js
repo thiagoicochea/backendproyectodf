@@ -3,6 +3,27 @@ const Product = require("../models/Product");
 
 const SUPPORT_INTRO = `Hola, soy NendoBot, tu asistente de soporte de NendoShop. Te puedo ayudar con pedidos, pagos, envíos, devoluciones y cuentas.`;
 
+const checkTextSafety = async (text) => {
+  const value = String(text || "").trim().toLowerCase();
+  if (!value) {
+    return { allowed: false, block: true, reason: "El mensaje está vacío." };
+  }
+
+  const blockedPatterns = [
+    /\b(sex|sexual|porno|pornografia|nudez|desnudo|masturb|orgias?)\b/i,
+    /\b(violencia|matar|asesinar|golpear|agredir|arma|explosivo|suicida|suicidio)\b/i,
+    /\b(puta|puto|mierda|idiota|estúpido|maldito|puta)\b/i,
+    /\b(terror|bomb|matarte|hacerte daño)\b/i
+  ];
+
+  const blocked = blockedPatterns.some((pattern) => pattern.test(value));
+  return {
+    allowed: !blocked,
+    block: blocked,
+    reason: blocked ? "El mensaje contiene contenido no permitido." : "Mensaje aceptado."
+  };
+};
+
 const normalizeCustomerName = (value) => {
   const name = String(value || "cliente").trim();
   return name || "cliente";
@@ -71,8 +92,8 @@ const buildSupportBotReply = async (input, session) => {
     if (positiveAnswer || negativeAnswer) {
       session.step = "closed";
       return positiveAnswer
-        ? `Gracias por tu feedback, ${customerName}. Tu opinión ayuda a mejorar NendoShop y ya podemos cerrar esta conversación.`
-        : `Gracias por tu comentario, ${customerName}. Lo tendremos en cuenta y cerramos esta conversación.`;
+        ? `Gracias por tu feedback, ${customerName}. Tu opinión ayuda a mejorar NendoShop y ya podemos cerrar esta conversación. Gracias por responder la encuesta de satisfacción.`
+        : `Gracias por tu comentario, ${customerName}. Lo tendremos en cuenta y cerramos esta conversación. Gracias por responder la encuesta de satisfacción.`;
     }
     return `Gracias por tu ayuda, ${customerName}. ¿Te gustaría responder una breve encuesta de satisfacción? Responde 1 para sí o 2 para no.`;
   }
@@ -142,7 +163,7 @@ const buildSupportBotReply = async (input, session) => {
     session.step = "survey";
     session.topic = null;
     session.surveyAsked = true;
-    return `Gracias por contactarnos, ${customerName}. Ha sido un gusto ayudarte. Antes de cerrar, ¿te gustaría responder una breve encuesta de satisfacción? Responde 1 para sí o 2 para no.`;
+    return `Gracias por contactarnos, ${customerName}. Ha sido un gusto ayudarte. Antes de cerrar, ¿te gustaría responder una breve encuesta de satisfacción? Responde 1 para sí o 2 para no. Si prefieres, también puedes decir adiós.`;
   }
 
   return `Puedo ayudarte con pedidos, pagos, envíos, devoluciones y cuentas, ${customerName}. Si quieres, responde con una opción: 1, 2, 3 o 4.`;
@@ -151,5 +172,6 @@ const buildSupportBotReply = async (input, session) => {
 module.exports = {
   SUPPORT_INTRO,
   createSupportSession,
-  buildSupportBotReply
+  buildSupportBotReply,
+  checkTextSafety
 };

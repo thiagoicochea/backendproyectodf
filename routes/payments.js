@@ -30,6 +30,7 @@ router.post("/", verifyToken, async (req, res) => {
                     id: `${payment._id || Date.now()}-${selected.name}`,
                     customer: payment.cliente || "Un cliente",
                     product: selected.name,
+                    productId: productDoc?._id?.toString?.() || null,
                     price: discountPrice,
                     priceLabel: `S/. ${discountPrice}`,
                     message: `Aprovecha esta oferta y lleva ${selected.name} con descuento.`
