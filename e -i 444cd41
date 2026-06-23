@@ -1,0 +1,25 @@
+[33m228bd27[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m Agregando metodos multifactor backend
+[33m88582cf[m Agregando metodos multifactor backend
+[33m444cd41[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Agregando metodos multifactor backend
+[33m10d5ced[m Agregando metodos multifactor backend
+[33m93bdb09[m Agregando metodos multifactor backend
+[33mbea2436[m Agregando metodos multifactor backend
+[33m10788d2[m Agregando metodos multifactor backend
+[33m25d10de[m Agregando metodos multifactor backend
+[33mcea928e[m Agregando metodos multifactor backend
+[33mec103c3[m feat(pagos): agregar sistema de historial y separar rutas Descripción: - Creación del modelo Logs para guardar el registro de cada acción.
+[33m2ed788a[m Actualizando metodo para cambiar correo con administrador de clientes
+[33meedbebc[m Importando bcrypt para hashear passwords
+[33meaf40e9[m Actualizando metodo para cambiar contraseñas
+[33m0825186[m Metodo para cambiar passwords admin
+[33m2c53b9e[m Agregando endpoint para cambiar discount
+[33mc13e275[m Mejorando metodos que acepta el backend.
+[33m774f2fb[m Agregando apartados para administrador en el backend
+[33m2fb7aa9[m Agregando  image perfil a auth
+[33m6e838f2[m backend listo para deploy
+[33m3717713[m backend listo para deploy
+[33m83c5eb8[m backend listo para deploy
+[33me230fb7[m backend listo para deploy
+[33m3b4e210[m backend listo para deploy
+[33mb71e9c9[m backend listo para deploy
+[33ma56f089[m backend listo para deploy
