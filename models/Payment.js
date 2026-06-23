@@ -7,7 +7,7 @@ const PaymentSchema = new mongoose.Schema({
     documento: String,
     razon_social: String,
 
-    metodo_envio: { type: String, enum: ['delivery', 'recojo'], default: 'delivery' },
+    metodo_envio: { type: String, enum: ['delivery', 'recojo', 'presencial'], default: 'delivery' },
     direccion_entrega: String, 
     referencia: String,
     envio: Number,

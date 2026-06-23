@@ -3,7 +3,8 @@ const SUPPORT_INTRO = `Hola, soy NendoBot, tu asistente de soporte de NendoShop.
 const createSupportSession = () => ({
   step: 'welcome',
   topic: null,
-  customerName: 'cliente'
+  customerName: 'cliente',
+  lastTopic: null
 });
 
 const extractOrderNumber = (text) => {
@@ -27,24 +28,28 @@ const buildSupportBotReply = (input, session) => {
   if (text === '1' || text.includes('pedido') || text.includes('envio') || text.includes('envío')) {
     session.step = 'order';
     session.topic = 'pedidos';
+    session.lastTopic = 'pedidos';
     return 'Perfecto. Te ayudo con tu pedido. Envíame tu número de pedido y te digo el estado y el siguiente paso.';
   }
 
   if (text === '2' || text.includes('pago') || text.includes('promoc') || text.includes('oferta')) {
     session.step = 'payment';
     session.topic = 'pagos';
+    session.lastTopic = 'pagos';
     return 'Claro. Puedo revisar pagos, promociones y descuentos. Si quieres, te puedo mostrar la oferta más atractiva del momento.';
   }
 
   if (text === '3' || text.includes('devol') || text.includes('cambio')) {
     session.step = 'returns';
     session.topic = 'devoluciones';
+    session.lastTopic = 'devoluciones';
     return 'Entendido. Para devoluciones o cambios, te pediré tus datos de compra y el motivo para abrir el proceso.';
   }
 
   if (text === '4' || text.includes('cuenta') || text.includes('acceso')) {
     session.step = 'account';
     session.topic = 'cuenta';
+    session.lastTopic = 'cuenta';
     return 'Voy a ayudarte con tu cuenta. Si tienes problemas con el acceso, dime si olvidaste tu contraseña o si tu sesión no abre.';
   }
 
@@ -65,7 +70,19 @@ const buildSupportBotReply = (input, session) => {
     return 'Puedo ayudarte con recuperación de cuenta, cambios de email o acceso a tu perfil. Dime cuál es el problema.';
   }
 
-  return 'Puedo ayudarte con pedidos, pagos, envíos, devoluciones y cuentas. Responde con una opción: 1, 2, 3 o 4.';
+  if (session.lastTopic === 'pedidos' && (text.includes('seguimiento') || text.includes('estado'))) {
+    return 'Claro. El seguimiento suele indicar si el pedido está en preparación, enviado o listo para entrega. Si me compartes el número, te digo más.';
+  }
+
+  if (session.lastTopic === 'pagos' && (text.includes('pago') || text.includes('promoc')) ) {
+    return 'Entiendo. Puedo revisar el estado de tu pago o ayudarte con una promoción vigente. Dime qué quieres confirmar.';
+  }
+
+  if (session.lastTopic === 'devoluciones' && (text.includes('motivo') || text.includes('producto'))) {
+    return 'Perfecto. Te puedo ayudar a abrir un cambio o devolución. Cuéntame qué producto fue y por qué necesitas el cambio.';
+  }
+
+  return 'Puedo ayudarte con pedidos, pagos, envíos, devoluciones y cuentas. Si quieres, responde con una opción: 1, 2, 3 o 4.';
 };
 
 module.exports = {
