@@ -6,6 +6,20 @@ const Product = require("../models/Product");
 const Config = require("../models/Config");
 const wsBroadcast = require("../utils/wsBroadcast");
 
+const extractGroqKey = (value) => {
+  if (!value) return null;
+  let candidate = value.trim();
+  if (candidate.startsWith("http")) {
+    try {
+      candidate = new URL(candidate).pathname;
+    } catch (err) {
+      candidate = value;
+    }
+  }
+  const match = candidate.match(/(gsk_[A-Za-z0-9_-]+)/);
+  return match ? match[1] : candidate;
+};
+
 const parseGroqModerationOutput = (responseJson) => {
   if (!responseJson) return null;
 
@@ -152,7 +166,7 @@ router.post("/:id/comments", async (req, res) => {
     const apiConfig = config?.apiComentarios?.find(
       (item) => item.key === "apiComentarios"
     );
-    const groqKey = apiConfig?.value;
+    const groqKey = extractGroqKey(apiConfig?.value);
 
     if (!groqKey) {
       return res.status(500).json({ message: "No hay clave de Groq configurada" });
