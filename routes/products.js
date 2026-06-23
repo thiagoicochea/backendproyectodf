@@ -172,7 +172,8 @@ router.post("/:id/comments", async (req, res) => {
       console.log("[COMMENTS] groq result", moderation);
     } catch (error) {
       console.error("Moderation error:", error);
-      return res.status(500).json({ message: "Error al verificar el comentario: " + (error.message || "error de Groq") });
+  
+      return res.status(500).json({ message: "Error al verificar el comentario" });
     }
 
     if (!moderation.allowed || moderation.block) {
