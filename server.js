@@ -66,12 +66,7 @@ wss.on("connection", (socket) => {
   });
 
   socket.on("close", () => {
-    if (socket.roomKey && socket.username) {
-      wsBroadcast.broadcastToRoom(socket.roomKey, {
-        type: "user-left",
-        username: socket.username
-      });
-    }
+    wsBroadcast.handleClientDisconnect(socket);
   });
 });
 
