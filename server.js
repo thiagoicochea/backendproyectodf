@@ -1,12 +1,13 @@
+const http = require("http");
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
+const { WebSocketServer } = require("ws");
+const wsBroadcast = require("./utils/wsBroadcast");
 const authRoutes = require("./routes/authRoutes");
 
 const PORT = process.env.PORT || 4000;
-
-
 
 require("dotenv").config();
 
