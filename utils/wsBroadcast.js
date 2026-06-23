@@ -4,6 +4,7 @@ const ChatRoom = require("../models/ChatRoom");
 
 let wss;
 const roomUsers = {};
+const activeConnections = new Map();
 
 const setWss = (server) => {
   wss = server;
@@ -127,6 +128,13 @@ const removeRoomUser = (roomKey, socket) => {
 };
 
 const handleClientDisconnect = (socket) => {
+  if (socket.username) {
+    const currentSocket = activeConnections.get(socket.username);
+    if (currentSocket === socket) {
+      activeConnections.delete(socket.username);
+    }
+  }
+
   if (!socket.roomKey || !socket.id) return;
   removeRoomUser(socket.roomKey, socket);
   broadcastToRoom(socket.roomKey, {
@@ -152,6 +160,17 @@ const handleClientMessage = async (socket, message) => {
       socket.id = Math.random().toString(36).slice(2);
     }
 
+    const normalizedUsername = String(username).trim() || "Invitado";
+    const previousSocket = activeConnections.get(normalizedUsername);
+    if (previousSocket && previousSocket !== socket) {
+      try {
+        previousSocket.send(JSON.stringify({ type: "force-disconnect", message: "Se abrió otra sesión del chat" }));
+        previousSocket.close(4000, "duplicate connection");
+      } catch (error) {
+        console.warn("No se pudo cerrar la conexión previa", error.message);
+      }
+    }
+
     if (socket.roomKey && socket.roomKey !== roomKey) {
       removeRoomUser(socket.roomKey, socket);
       broadcastToRoom(socket.roomKey, { type: "user-left", userId: socket.id, username: socket.username });
@@ -159,7 +178,8 @@ const handleClientMessage = async (socket, message) => {
     }
 
     socket.roomKey = roomKey;
-    socket.username = username;
+    socket.username = normalizedUsername;
+    activeConnections.set(normalizedUsername, socket);
     addRoomUser(roomKey, socket);
 
     socket.send(JSON.stringify({ type: "joined", roomKey }));
