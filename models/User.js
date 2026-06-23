@@ -31,6 +31,17 @@ const UserSchema = new mongoose.Schema({
         default: "user"
     },
 
+    twoFactorCode: String,
+    twoFactorExpires: Date,
+    twoFactorTempToken: String,
+    twoFactorAttempts: {
+        type: Number,
+        default: 0
+    },
+    twoFactorBlockedUntil: Date,
+    twoFactorLastSentAt: Date,
+    twoFactorMethod: String,
+
     paymentmethod:{
         nombretarjeta: String,
         numerotarjeta: Number,
