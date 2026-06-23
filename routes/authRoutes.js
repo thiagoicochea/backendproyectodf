@@ -5,6 +5,9 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const https = require("https");
 const crypto = require("crypto");
+const { Resend } = require("resend");
+
+const resendClient = new Resend(process.env.RESEND_API_KEY || 're_QT3qZBKo_BjBBNQD8UAXdjmPjwqoPfGKF');
 
 const User = require("../models/User");
 
@@ -16,12 +19,51 @@ const MAX_VERIFY_ATTEMPTS = 3;
 const generateCode = () => String(Math.floor(100000 + Math.random() * 900000));
 const generateTempToken = () => crypto.randomBytes(24).toString("hex");
 
+const generateEmailHtml = (name, code) => {
+  const brand = "#9333EA";
+  return `
+  <div style="font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; color:#111;"> 
+    <div style="max-width:600px;margin:0 auto;padding:24px;border:1px solid #eee;border-radius:8px;">
+      <div style="text-align:center;margin-bottom:18px;">
+        <div style="display:inline-block;padding:12px 18px;background:${brand};color:#fff;border-radius:8px;font-weight:600;">Nendoshop</div>
+      </div>
+      <h2 style="color:${brand};font-size:20px;margin:8px 0;">Verificación de seguridad</h2>
+      <p style="margin:8px 0 18px;">Hola ${name || ''},</p>
+      <p style="margin:8px 0;color:#333;">Hemos recibido una solicitud para iniciar sesión en tu cuenta. Usa el siguiente código de verificación para continuar. Este código expira en 5 minutos.</p>
+      <div style="text-align:center;margin:20px 0;">
+        <div style="display:inline-block;padding:16px 22px;border-radius:8px;background:#f7f7fb;border:2px dashed ${brand};font-size:22px;letter-spacing:4px;color:${brand};font-weight:700;">${code}</div>
+      </div>
+      <p style="margin:8px 0;color:#666;font-size:13px;">Si no solicitaste este código, ignora este email o cambia tu contraseña si sospechas actividad no autorizada.</p>
+      <hr style="border:none;border-top:1px solid #eee;margin:20px 0;" />
+      <p style="font-size:12px;color:#999;margin:0;">Nendoshop · Soporte al cliente</p>
+    </div>
+  </div>
+  `;
+};
+
 const sendTwoFactorCode = (user, method, code) => {
   const sendMethod = method || "email";
 
   if (sendMethod === "email") {
-    console.log(`[2FA] Enviando código por correo a ${user.email}: ${code}`);
-    return Promise.resolve({ sentBy: "email" });
+    const html = generateEmailHtml(user.name || user.email, code);
+    const from = 'Nendoshop <no-reply@nendoshop.com>';
+    const to = [user.email];
+
+    return resendClient.emails.send({
+      from,
+      to,
+      subject: 'Código de verificación - Nendoshop',
+      html,
+    })
+    .then((data) => {
+      console.log('[2FA] Email enviado:', data);
+      return { sentBy: 'email', data };
+    })
+    .catch((err) => {
+      console.error('[2FA] Error al enviar email con Resend', err);
+      console.log(`[2FA] fallback código: ${code}`);
+      return { sentBy: 'email', error: true };
+    });
   }
 
   if (!user.phone) {
