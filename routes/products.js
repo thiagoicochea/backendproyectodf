@@ -23,45 +23,36 @@ const extractGroqKey = (value) => {
 const parseGroqModerationOutput = (responseJson) => {
   if (!responseJson) return null;
 
-  const extractText = (item) => {
-    if (!item) return "";
-    if (typeof item.output_text === "string") return item.output_text;
-    if (typeof item.text === "string") return item.text;
-    if (Array.isArray(item.content)) {
-      return item.content
-        .map((contentItem) => contentItem.text || "")
-        .join("");
+  const extractText = (value) => {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) {
+      return value.map(extractText).filter(Boolean).join(" ");
     }
-    if (Array.isArray(item.output)) {
-      return item.output
-        .map((nestedItem) => extractText(nestedItem))
-        .join("");
+    if (typeof value === "object") {
+      if (typeof value.output_text === "string") return value.output_text;
+      if (typeof value.text === "string") return value.text;
+      if (value.content) return extractText(value.content);
+      if (value.output) return extractText(value.output);
+      return Object.values(value).map(extractText).filter(Boolean).join(" ");
     }
     return "";
   };
 
-  let text = extractText(responseJson);
-
-  if (!text && Array.isArray(responseJson.output)) {
-    text = responseJson.output
-      .map((item) => extractText(item))
-      .filter(Boolean)
-      .join("\n");
-  }
-
+  const text = extractText(responseJson).trim();
   if (!text) return null;
 
+  const extractJsonText = (candidate) => {
+    const fullJsonMatch = candidate.match(/\{[\s\S]*\}/);
+    if (fullJsonMatch) return fullJsonMatch[0];
+    return candidate;
+  };
+
+  const jsonText = extractJsonText(text);
   try {
-    return JSON.parse(text.trim());
+    return JSON.parse(jsonText);
   } catch (error) {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      try {
-        return JSON.parse(match[0]);
-      } catch (err) {
-        return null;
-      }
-    }
+    console.error("Groq moderation JSON parse failed", { text, jsonText, error: error.message });
     return null;
   }
 };
