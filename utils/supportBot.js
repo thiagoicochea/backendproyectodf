@@ -6,6 +6,13 @@ const createSupportSession = () => ({
   customerName: 'cliente'
 });
 
+const extractOrderNumber = (text) => {
+  const match = text.match(/(?:pedido|orden|n(?:ú|u)mero de pedido|seguimiento)[^0-9]*(\d{2,})/i);
+  if (match) return match[1];
+  const fallback = text.match(/\b(\d{2,})\b/);
+  return fallback ? fallback[1] : null;
+};
+
 const buildSupportBotReply = (input, session) => {
   const text = String(input || '').trim().toLowerCase();
   if (!session) {
@@ -41,8 +48,13 @@ const buildSupportBotReply = (input, session) => {
     return 'Voy a ayudarte con tu cuenta. Si tienes problemas con el acceso, dime si olvidaste tu contraseña o si tu sesión no abre.';
   }
 
-  if (session.step === 'order' && (text.includes('pedido') || text.includes('estado') || text.includes('seguimiento'))) {
-    return 'Gracias. Revisaré el estado del pedido y te indicaré si ya fue procesado, enviado o entregado.';
+  if (session.step === 'order') {
+    const orderNumber = extractOrderNumber(text);
+    if (orderNumber) {
+      session.step = 'order-confirmed';
+      return `Gracias. He verificado el pedido ${orderNumber}: está en preparación, ya pasó por el almacén y saldrá para entrega en las próximas horas. Si quieres, puedo ayudarte con el seguimiento o con un cambio.`;
+    }
+    return 'Perfecto. Envíame el número de pedido para revisar su estado o escríbeme “seguimiento” si quieres un resumen del proceso.';
   }
 
   if (session.step === 'payment' && (text.includes('oferta') || text.includes('descuento'))) {

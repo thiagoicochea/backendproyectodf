@@ -313,12 +313,17 @@ const handleClientMessage = async (socket, message) => {
       return socket.send(JSON.stringify({ type: "error", message: moderation.reason || "Tu mensaje fue bloqueado por moderación" }));
     }
 
+    const userAvatar = socket.userId
+      ? (await User.findById(socket.userId).catch(() => null))?.profileImg || ""
+      : "";
+
     const userMessage = await ChatMessage.create({
       roomKey,
       userId: socket.userId || undefined,
       username: socket.username,
       text,
-      role: "user"
+      role: "user",
+      profileImg: userAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(socket.username)}&background=7c3aed&color=ffffff`
     });
 
     broadcastToRoom(roomKey, { type: "room-message", message: userMessage });
