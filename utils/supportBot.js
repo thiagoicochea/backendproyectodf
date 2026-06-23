@@ -1,12 +1,19 @@
 const Payment = require("../models/Payment");
+const Product = require("../models/Product");
 
 const SUPPORT_INTRO = `Hola, soy NendoBot, tu asistente de soporte de NendoShop. Te puedo ayudar con pedidos, pagos, envíos, devoluciones y cuentas.`;
 
-const createSupportSession = () => ({
-  step: 'welcome',
+const normalizeCustomerName = (value) => {
+  const name = String(value || "cliente").trim();
+  return name || "cliente";
+};
+
+const createSupportSession = (customerName = "cliente") => ({
+  step: "welcome",
   topic: null,
-  customerName: 'cliente',
-  lastTopic: null
+  customerName: normalizeCustomerName(customerName),
+  lastTopic: null,
+  surveyAsked: false
 });
 
 const extractOrderNumber = (text) => {
@@ -16,80 +23,129 @@ const extractOrderNumber = (text) => {
   return fallback ? fallback[1] : null;
 };
 
+const extractProductHint = (text) => {
+  const hints = text.match(/(?:producto|figura|art(?:í|i)culo|modelo|articulo)[^a-záéíóúñü0-9]*([a-záéíóúñü0-9 .,'-]+)/i);
+  if (hints && hints[1]) return hints[1].trim();
+  const fallback = text.match(/(?:quiero|busco|necesito|interesa|recomienda|ver)[^a-záéíóúñü0-9]*([a-záéíóúñü0-9 .,'-]+)/i);
+  return fallback ? fallback[1].trim() : null;
+};
+
+const findProductsByHint = async (hint) => {
+  if (!hint) return [];
+  const words = hint.split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const regex = new RegExp(words.slice(0, 4).join("|"), "i");
+  return Product.find({
+    $or: [
+      { name: regex },
+      { description: regex },
+      { "specs.categoria": regex }
+    ]
+  }).limit(3).lean().catch(() => []);
+};
+
 const buildSupportBotReply = async (input, session) => {
-  const text = String(input || '').trim().toLowerCase();
+  const text = String(input || "").trim();
+  const lowered = text.toLowerCase();
+  const customerName = normalizeCustomerName(session?.customerName);
+
   if (!session) {
-    return `${SUPPORT_INTRO}\n\n1) Pedidos y envíos\n2) Pagos y promociones\n3) Devoluciones y cambios\n4) Cuenta y acceso`;
+    return `${SUPPORT_INTRO}\n\nHola ${customerName}, puedo ayudarte a revisar pedidos y hablar de productos. No pediré ni compartiré credenciales, contraseñas o datos sensibles.\n\n1) Pedidos y envíos\n2) Productos y recomendaciones\n3) Devoluciones y cambios\n4) Cuenta y acceso`;
   }
 
-  if (session.step === 'welcome') {
-    session.step = 'menu';
-    return `${SUPPORT_INTRO}\n\n¿En qué te puedo ayudar hoy?\n\n1) Pedidos y envíos\n2) Pagos y promociones\n3) Devoluciones y cambios\n4) Cuenta y acceso`;
+  if (session.step === "welcome") {
+    session.step = "menu";
+    return `${SUPPORT_INTRO}\n\nHola ${customerName}, ¿en qué te puedo ayudar hoy?\n\nPuedo ayudarte a:\n- Ver el estado de tus pedidos\n- Hablar sobre productos y recomendaciones\n- Orientarte sobre devoluciones y pagos\n\nNo pediré ni compartiré credenciales, contraseñas ni datos sensibles.\n\n1) Pedidos y envíos\n2) Productos y recomendaciones\n3) Devoluciones y cambios\n4) Cuenta y acceso`;
   }
 
-  if (text === '1' || text.includes('pedido') || text.includes('envio') || text.includes('envío')) {
-    session.step = 'order';
-    session.topic = 'pedidos';
-    session.lastTopic = 'pedidos';
-    return 'Perfecto. Te ayudo con tu pedido. Envíame tu número de pedido y te digo el estado y el siguiente paso.';
+  if (lowered === "1" || lowered.includes("pedido") || lowered.includes("envio") || lowered.includes("envío") || lowered.includes("seguimiento")) {
+    session.step = "order";
+    session.topic = "pedidos";
+    session.lastTopic = "pedidos";
+    return `Claro, ${customerName}. Te ayudo con tus pedidos. Envíame tu número de pedido y te digo el estado y el siguiente paso.`;
   }
 
-  if (text === '2' || text.includes('pago') || text.includes('promoc') || text.includes('oferta')) {
-    session.step = 'payment';
-    session.topic = 'pagos';
-    session.lastTopic = 'pagos';
-    return 'Claro. Puedo revisar pagos, promociones y descuentos. Si quieres, te puedo mostrar la oferta más atractiva del momento.';
+  if (session.step === "survey") {
+    const positiveAnswer = /\b(si|sí|s[ií]|1|ok|okay|bien|excelente|genial|perfecto)\b/i.test(lowered);
+    const negativeAnswer = /\b(no|2|mal|mejorar|meh|regular)\b/i.test(lowered);
+    if (positiveAnswer || negativeAnswer) {
+      session.step = "closed";
+      return positiveAnswer
+        ? `Gracias por tu feedback, ${customerName}. Tu opinión ayuda a mejorar NendoShop y ya podemos cerrar esta conversación.`
+        : `Gracias por tu comentario, ${customerName}. Lo tendremos en cuenta y cerramos esta conversación.`;
+    }
+    return `Gracias por tu ayuda, ${customerName}. ¿Te gustaría responder una breve encuesta de satisfacción? Responde 1 para sí o 2 para no.`;
   }
 
-  if (text === '3' || text.includes('devol') || text.includes('cambio')) {
-    session.step = 'returns';
-    session.topic = 'devoluciones';
-    session.lastTopic = 'devoluciones';
-    return 'Entendido. Para devoluciones o cambios, te pediré tus datos de compra y el motivo para abrir el proceso.';
+  if (lowered === "2" || lowered.includes("producto") || lowered.includes("figura") || lowered.includes("artículo") || lowered.includes("articulo") || lowered.includes("recomend") || lowered.includes("precio") || lowered.includes("stock")) {
+    session.step = "product";
+    session.topic = "productos";
+    session.lastTopic = "productos";
+    return `Claro, ${customerName}. Puedo hablarte sobre productos, disponibilidad y recomendaciones. Cuéntame qué figura o artículo te interesa y te digo qué tenemos disponible.`;
   }
 
-  if (text === '4' || text.includes('cuenta') || text.includes('acceso')) {
-    session.step = 'account';
-    session.topic = 'cuenta';
-    session.lastTopic = 'cuenta';
-    return 'Voy a ayudarte con tu cuenta. Si tienes problemas con el acceso, dime si olvidaste tu contraseña o si tu sesión no abre.';
+  if (lowered === "3" || lowered.includes("devol") || lowered.includes("cambio")) {
+    session.step = "returns";
+    session.topic = "devoluciones";
+    session.lastTopic = "devoluciones";
+    return `Entendido, ${customerName}. Para devoluciones o cambios, puedo orientarte sobre el proceso. Cuéntame qué pasó con el producto y te digo el siguiente paso.`;
   }
 
-  if (session.step === 'order') {
+  if (lowered === "4" || lowered.includes("cuenta") || lowered.includes("acceso") || lowered.includes("contrase") || lowered.includes("credencial")) {
+    session.step = "account";
+    session.topic = "cuenta";
+    session.lastTopic = "cuenta";
+    return `Voy a ayudarte con tu cuenta, ${customerName}. Por seguridad, no puedo pedir ni compartir contraseñas, credenciales o datos sensibles. Si tienes problema con el acceso, dime qué pasó y te orientaré sin esos datos.`;
+  }
+
+  if (session.step === "order") {
     const orderNumber = extractOrderNumber(text);
     if (orderNumber) {
       const payment = await Payment.findOne({ documento: orderNumber }).catch(() => null);
       if (payment) {
-        session.step = 'order-confirmed';
-        return `Gracias. He verificado el pedido ${orderNumber}: está ${payment.estado || 'Pagado'} y el total es S/. ${payment.total || 0}. Si quieres, puedo ayudarte con seguimiento, cambios o devoluciones.`;
+        session.step = "order-confirmed";
+        return `Gracias, ${customerName}. He revisado el pedido ${orderNumber}: está ${payment.estado || "Pagado"} y el total es S/. ${payment.total || 0}. Si quieres, también puedo explicarte el seguimiento o ayudarte con cambios y devoluciones.`;
       }
-      session.step = 'order-confirmed';
-      return `Gracias. He verificado el pedido ${orderNumber}: está en preparación, ya pasó por el almacén y saldrá para entrega en las próximas horas. Si quieres, puedo ayudarte con el seguimiento o con un cambio.`;
+      session.step = "order-confirmed";
+      return `Gracias, ${customerName}. No encontré ese pedido en la base de datos, pero puedo ayudarte a revisar el proceso de envío o a verificar el número que me compartiste.`;
     }
-    return 'Perfecto. Envíame el número de pedido para revisar su estado o escríbeme “seguimiento” si quieres un resumen del proceso.';
+    return `Perfecto, ${customerName}. Envíame el número de pedido para revisar su estado o escríbeme “seguimiento” si quieres un resumen del proceso.`;
   }
 
-  if (session.step === 'payment' && (text.includes('oferta') || text.includes('descuento'))) {
-    return 'Tenemos promociones activas en productos seleccionados. Te recomiendo revisar el catálogo y aprovechar los descuentos destacados.';
+  if (session.step === "product") {
+    const productHint = extractProductHint(text);
+    if (productHint) {
+      const products = await findProductsByHint(productHint);
+      if (products.length) {
+        const [product] = products;
+        session.step = "product-confirmed";
+        return `Claro, ${customerName}. Encontré ${product.name} por un precio de S/. ${product.price || 0}. Actualmente hay ${product.stock || 0} unidades disponibles. Puedo comentarte más sobre el producto o ayudarte a elegir una alternativa.`;
+      }
+      return `No encontré un producto con ese nombre, ${customerName}. Compárteme el nombre exacto o una pista y te ayudo a revisar nuestras opciones.`;
+    }
+    return `Puedo ayudarte a revisar productos, ${customerName}. Dime el nombre o una referencia del artículo que te interesa.`;
   }
 
-  if (session.step === 'account') {
-    return 'Puedo ayudarte con recuperación de cuenta, cambios de email o acceso a tu perfil. Dime cuál es el problema.';
+  if (session.step === "account") {
+    return `Puedo ayudarte con recuperación de cuenta, cambios de email o acceso a tu perfil, ${customerName}. No pediré ni compartiré credenciales ni contraseñas.`;
   }
 
-  if (session.lastTopic === 'pedidos' && (text.includes('seguimiento') || text.includes('estado'))) {
-    return 'Claro. El seguimiento suele indicar si el pedido está en preparación, enviado o listo para entrega. Si me compartes el número, te digo más.';
+  if (session.lastTopic === "pedidos" && (lowered.includes("seguimiento") || lowered.includes("estado"))) {
+    return `Claro, ${customerName}. El seguimiento suele indicar si el pedido está en preparación, enviado o listo para entrega. Si me compartes el número, te digo más.`;
   }
 
-  if (session.lastTopic === 'pagos' && (text.includes('pago') || text.includes('promoc')) ) {
-    return 'Entiendo. Puedo revisar el estado de tu pago o ayudarte con una promoción vigente. Dime qué quieres confirmar.';
+  if (session.lastTopic === "productos" && (lowered.includes("producto") || lowered.includes("figura") || lowered.includes("recom") || lowered.includes("precio"))) {
+    return `Puedo revisarlo contigo, ${customerName}. Dime el nombre del producto o una palabra clave y te digo si está disponible y cuál es su precio aproximado.`;
   }
 
-  if (session.lastTopic === 'devoluciones' && (text.includes('motivo') || text.includes('producto'))) {
-    return 'Perfecto. Te puedo ayudar a abrir un cambio o devolución. Cuéntame qué producto fue y por qué necesitas el cambio.';
+  if (lowered.includes("gracias") || lowered.includes("adios") || lowered.includes("adiós") || lowered.includes("terminamos")) {
+    session.step = "survey";
+    session.topic = null;
+    session.surveyAsked = true;
+    return `Gracias por contactarnos, ${customerName}. Ha sido un gusto ayudarte. Antes de cerrar, ¿te gustaría responder una breve encuesta de satisfacción? Responde 1 para sí o 2 para no.`;
   }
 
-  return 'Puedo ayudarte con pedidos, pagos, envíos, devoluciones y cuentas. Si quieres, responde con una opción: 1, 2, 3 o 4.';
+  return `Puedo ayudarte con pedidos, pagos, envíos, devoluciones y cuentas, ${customerName}. Si quieres, responde con una opción: 1, 2, 3 o 4.`;
 };
 
 module.exports = {

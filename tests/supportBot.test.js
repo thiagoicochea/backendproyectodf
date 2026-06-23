@@ -1,19 +1,52 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { buildSupportBotReply, createSupportSession } = require('../utils/supportBot');
+const { checkTextSafety } = require('../utils/wsBroadcast');
 
-test('buildSupportBotReply returns a greeting with options', () => {
+test('buildSupportBotReply returns a greeting with options', async () => {
   const session = createSupportSession();
-  const reply = buildSupportBotReply('hola', session);
+  const reply = await buildSupportBotReply('hola', session);
   assert.match(reply, /NendoBot/i);
   assert.match(reply, /1\)/);
   assert.match(reply, /2\)/);
 });
 
-test('buildSupportBotReply can guide a purchase issue flow', () => {
+test('buildSupportBotReply can guide a purchase issue flow', async () => {
   const session = createSupportSession();
-  buildSupportBotReply('hola', session);
-  const reply = buildSupportBotReply('1', session);
+  await buildSupportBotReply('hola', session);
+  const reply = await buildSupportBotReply('1', session);
   assert.match(reply, /pedido/i);
   assert.match(reply, /número de pedido/i);
+});
+
+test('checkTextSafety blocks violent or sexual content locally', async () => {
+  const result = await checkTextSafety('Quiero hacer algo sexual muy explícito');
+  assert.equal(result.allowed, false);
+  assert.equal(result.block, true);
+});
+
+test('buildSupportBotReply personalizes the welcome response with the customer name', async () => {
+  const session = createSupportSession('Ana');
+  const reply = await buildSupportBotReply('hola', session);
+  assert.match(reply, /Ana/i);
+  assert.match(reply, /pedidos/i);
+  assert.match(reply, /productos/i);
+  assert.match(reply, /No pedir/i);
+});
+
+test('buildSupportBotReply can end the conversation gracefully', async () => {
+  const session = createSupportSession();
+  await buildSupportBotReply('hola', session);
+  const reply = await buildSupportBotReply('gracias, ya terminamos', session);
+  assert.match(reply, /gracias/i);
+  assert.match(reply, /adiós/i);
+});
+
+test('buildSupportBotReply asks for a satisfaction survey before closing', async () => {
+  const session = createSupportSession();
+  await buildSupportBotReply('hola', session);
+  await buildSupportBotReply('gracias, ya terminamos', session);
+  const closingReply = await buildSupportBotReply('sí, todo bien', session);
+  assert.match(closingReply, /satisfacción/i);
+  assert.match(closingReply, /gracias/i);
 });
