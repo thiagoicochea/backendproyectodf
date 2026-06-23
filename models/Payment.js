@@ -1,19 +1,23 @@
 const mongoose = require("mongoose");
 
 const PaymentSchema = new mongoose.Schema({
-
     cliente: String,
-    direccion: String,
+
+    tipo_comprobante: { type: String, enum: ['boleta', 'factura'], default: 'boleta' },
+    documento: String,
+    razon_social: String,
+
+    metodo_envio: { type: String, enum: ['delivery', 'recojo'], default: 'delivery' },
+    direccion_entrega: String, 
+    referencia: String,
     envio: Number,
 
     productos: [
-
         {
             name: String,
             quantity: Number,
             price: Number
         }
-
     ],
 
     total: Number,

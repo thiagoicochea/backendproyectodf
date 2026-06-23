@@ -35,7 +35,9 @@ app.use("/api/configs", require("./routes/configRoutes"));
 app.use("/api/users",require("./routes/userRoutes"))
 app.use("/api/auth", authRoutes);
 
+app.use("/api/admin/logs", require("./routes/logs"));
 
+app.use("/api/payments", require("./routes/payments"));
 
 app.listen(PORT, () => {
   console.log("Servidor corriendo en puerto " + PORT);
