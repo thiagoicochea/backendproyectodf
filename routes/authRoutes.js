@@ -7,7 +7,7 @@ const https = require("https");
 const crypto = require("crypto");
 const { Resend } = require("resend");
 
-const resendClient = new Resend(process.env.RESEND_API_KEY || 're_QT3qZBKo_BjBBNQD8UAXdjmPjwqoPfGKF');
+const resendClient = new Resend(process.env.RESEND_API_KEY);
 
 const User = require("../models/User");
 
@@ -41,29 +41,33 @@ const generateEmailHtml = (name, code) => {
   `;
 };
 
-const sendTwoFactorCode = (user, method, code) => {
+const sendTwoFactorCode = async (user, method, code) => {
   const sendMethod = method || "email";
 
   if (sendMethod === "email") {
     const html = generateEmailHtml(user.name || user.email, code);
-    const from = 'Nendoshop <no-reply@nendoshop.com>';
-    const to = [user.email];
+    const from = 'Nendoshop <onboarding@resend.dev>';
+    const to = user.email;
+    const replyTo = from;
+    const text = `Hola ${user.name || user.email},\n\nTu código de verificación es: ${code}.\n\nSi no solicitaste este código, ignora este mensaje.`;
 
-    return resendClient.emails.send({
-      from,
-      to,
-      subject: 'Código de verificación - Nendoshop',
-      html,
-    })
-    .then((data) => {
+    try {
+      const { data } = await resendClient.emails.send({
+        from,
+        to,
+        replyTo,
+        subject: 'Código de verificación - Nendoshop',
+        text,
+        html,
+      });
+
       console.log('[2FA] Email enviado:', data);
       return { sentBy: 'email', data };
-    })
-    .catch((err) => {
+    } catch (err) {
       console.error('[2FA] Error al enviar email con Resend', err);
       console.log(`[2FA] fallback código: ${code}`);
       return { sentBy: 'email', error: true };
-    });
+    }
   }
 
   if (!user.phone) {
