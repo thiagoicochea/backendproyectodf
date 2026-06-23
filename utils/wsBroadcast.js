@@ -1,6 +1,7 @@
 const https = require("https");
 const ChatMessage = require("../models/ChatMessage");
 const ChatRoom = require("../models/ChatRoom");
+const User = require("../models/User");
 
 let wss;
 const roomUsers = {};
@@ -26,6 +27,76 @@ const localSupportFallback = (comment) => {
     return "Puedes solicitar una devolución o cambio dentro de 7 días después de recibir tu pedido. Conserva el empaque original y comunícate con soporte para que te orienten en el proceso.";
   }
   return "NendoShop ofrece ayuda sobre productos, envíos, pagos y seguimiento de pedidos. Cuéntame tu duda y te respondo con detalles sobre cómo funciona nuestro servicio.";
+};
+
+const moderateChatText = async (text) => {
+  const cleanText = String(text || "").trim();
+  if (!cleanText) {
+    return { allowed: true, block: false, category: "apropiado", reason: "Mensaje vacío" };
+  }
+
+  const lower = cleanText.toLowerCase();
+  const suspiciousWords = ["insulto", "idiota", "tonto", "puta", "puta", "mierda", "sexo", "porn", "amenaza", "matar", "mata", "kill", "fuck", "shit", "bitch"];
+  const shouldBlock = suspiciousWords.some((word) => lower.includes(word));
+  if (shouldBlock) {
+    return { allowed: false, block: true, category: "inapropiado", reason: "Contenido inapropiado detectado" };
+  }
+
+  const apiKey = getGroqKey();
+  if (!apiKey) {
+    return { allowed: true, block: false, category: "apropiado", reason: "Sin indicios de abuso" };
+  }
+
+  return new Promise((resolve) => {
+    const payload = JSON.stringify({
+      model: "llama",
+      input: `Eres un moderador de chat. Responde únicamente con un JSON válido con las llaves: allowed, block, category, reason. Si el mensaje contiene insultos, amenazas, contenido sexual explícito, spam o agresión, marca block true y allowed false. Si es una conversación normal, marca allowed true y block false. Mensaje: "${cleanText}"`,
+      temperature: 0,
+      max_output_tokens: 180
+    });
+
+    const request = https.request(
+      {
+        hostname: "api.groq.com",
+        path: "/openai/v1/responses",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`
+        }
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => { data += chunk; });
+        res.on("end", () => {
+          try {
+            const parsed = JSON.parse(data);
+            const outputText = parsed.output_text || "";
+            const result = outputText ? JSON.parse(outputText) : null;
+            if (result && typeof result === "object") {
+              resolve({
+                allowed: result.allowed !== false,
+                block: Boolean(result.block),
+                category: result.category || "apropiado",
+                reason: result.reason || ""
+              });
+              return;
+            }
+          } catch (error) {
+            console.warn("Moderación de chat fallida", error.message);
+          }
+          resolve({ allowed: true, block: false, category: "apropiado", reason: "Fallback" });
+        });
+      }
+    );
+
+    request.on("error", () => {
+      resolve({ allowed: true, block: false, category: "apropiado", reason: "Fallback" });
+    });
+
+    request.write(payload);
+    request.end();
+  });
 };
 
 const sendGroqSupportAnswer = (comment) => {
@@ -111,7 +182,8 @@ const createUserPayload = (socket) => ({
   id: socket.id,
   username: socket.username,
   avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(socket.username)}&background=7c3aed&color=ffffff`,
-  online: true
+  online: true,
+  status: socket.chatBlocked ? "Bloqueado" : "Activo"
 });
 
 const addRoomUser = (roomKey, socket) => {
@@ -149,7 +221,7 @@ const handleClientDisconnect = (socket) => {
 };
 
 const handleClientMessage = async (socket, message) => {
-  const { type, roomKey, text, username } = message;
+  const { type, roomKey, text, username, userId } = message;
 
   if (type === "join") {
     if (!roomKey || !username) {
@@ -168,6 +240,16 @@ const handleClientMessage = async (socket, message) => {
         previousSocket.close(4000, "duplicate connection");
       } catch (error) {
         console.warn("No se pudo cerrar la conexión previa", error.message);
+      }
+    }
+
+    socket.userId = userId || socket.userId || null;
+    if (socket.userId) {
+      const userRecord = await User.findById(socket.userId).catch(() => null);
+      socket.chatBlocked = Boolean(userRecord?.chatBlockedUntil && new Date(userRecord.chatBlockedUntil) > new Date());
+      socket.chatBlockedUntil = userRecord?.chatBlockedUntil || null;
+      if (socket.chatBlocked) {
+        return socket.send(JSON.stringify({ type: "error", message: "Tu cuenta está temporalmente bloqueada para chatear" }));
       }
     }
 
@@ -200,13 +282,23 @@ const handleClientMessage = async (socket, message) => {
       return socket.send(JSON.stringify({ type: "error", message: "Datos de mensaje incompletos" }));
     }
 
+    if (socket.chatBlocked) {
+      return socket.send(JSON.stringify({ type: "error", message: "Tu cuenta está bloqueada para chatear" }));
+    }
+
     const room = await ChatRoom.findOne({ key: roomKey });
     if (!room) {
       return socket.send(JSON.stringify({ type: "error", message: "Sala de chat inválida" }));
     }
 
+    const moderation = await moderateChatText(text);
+    if (!moderation.allowed || moderation.block) {
+      return socket.send(JSON.stringify({ type: "error", message: moderation.reason || "Tu mensaje fue bloqueado por moderación" }));
+    }
+
     const userMessage = await ChatMessage.create({
       roomKey,
+      userId: socket.userId || undefined,
       username: socket.username,
       text,
       role: "user"
@@ -218,6 +310,7 @@ const handleClientMessage = async (socket, message) => {
       const supportResponse = await sendGroqSupportAnswer(text);
       const assistantMessage = await ChatMessage.create({
         roomKey,
+        userId: null,
         username: "NendoShop Support",
         text: supportResponse.text,
         role: "assistant"
@@ -225,6 +318,46 @@ const handleClientMessage = async (socket, message) => {
       broadcastToRoom(roomKey, { type: "room-message", message: assistantMessage });
     }
 
+    return;
+  }
+
+  if (type === "report-user") {
+    const targetUserId = message.targetUserId || message.userId || null;
+    const targetUsername = message.targetUsername || null;
+    const reason = message.reason || "Sin motivo especificado";
+    if (!targetUserId && !targetUsername) {
+      return socket.send(JSON.stringify({ type: "error", message: "No hay usuario para reportar" }));
+    }
+
+    const targetUser = targetUserId
+      ? await User.findById(targetUserId).catch(() => null)
+      : await User.findOne({ $or: [{ name: targetUsername }, { email: targetUsername }] }).catch(() => null);
+
+    if (!targetUser) {
+      return socket.send(JSON.stringify({ type: "error", message: "No se encontró al usuario" }));
+    }
+
+    const nextCount = (targetUser.chatReportCount || 0) + 1;
+    targetUser.chatReportCount = nextCount;
+    if (nextCount >= 10) {
+      targetUser.chatBlockedUntil = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      targetUser.chatBlockReason = reason;
+    }
+    await targetUser.save();
+
+    socket.send(JSON.stringify({
+      type: "report-result",
+      success: true,
+      count: nextCount,
+      blocked: Boolean(targetUser.chatBlockedUntil && new Date(targetUser.chatBlockedUntil) > new Date())
+    }));
+
+    broadcastToRoom(socket.roomKey, {
+      type: "user-report",
+      username: targetUser.name || targetUser.email || targetUsername,
+      count: nextCount,
+      blocked: Boolean(targetUser.chatBlockedUntil && new Date(targetUser.chatBlockedUntil) > new Date())
+    });
     return;
   }
 

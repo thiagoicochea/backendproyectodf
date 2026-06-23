@@ -47,7 +47,14 @@ const UserSchema = new mongoose.Schema({
         numerotarjeta: Number,
         cvv: Number,
         tipo: String
-    }
+    },
+
+    chatReportCount: {
+        type: Number,
+        default: 0
+    },
+    chatBlockedUntil: Date,
+    chatBlockReason: String
 
 }, {
     timestamps: true
