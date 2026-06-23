@@ -63,37 +63,14 @@ const moderateCommentWithGroq = (apiKey, comment) => {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify({
       model: "llama",
-      input: [
-        {
-          role: "system",
-          content: "Eres un asistente de moderación de comentarios. Responde solo con JSON válido y no agregues texto extra. Usa las llaves allowed, block, category y reason."
-        },
-        {
-          role: "user",
-          content: `Analiza este comentario y devuelve JSON. Si el comentario es impropio, block debe ser true y allowed debe ser false. Comenta: ${comment}`
-        }
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "moderation",
-          schema: {
-            type: "object",
-            properties: {
-              allowed: { type: "boolean" },
-              block: { type: "boolean" },
-              category: { type: "string" },
-              reason: { type: "string" }
-            },
-            required: ["allowed", "block", "category", "reason"]
-          }
-        }
-      }
+      input: `Eres un moderador de comentarios. Devuelve únicamente un JSON válido con estas llaves: allowed, block, category, reason. Si el comentario es inapropiado, block debe ser true y allowed debe ser false. Aquí está el comentario: "${comment}"`,
+      max_output_tokens: 500
     });
 
     const request = https.request(
-      "https://api.groq.com/openai/v1/responses",
       {
+        hostname: "api.groq.com",
+        path: "/openai/v1/responses",
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -116,10 +93,11 @@ const moderateCommentWithGroq = (apiKey, comment) => {
             const responseJson = JSON.parse(data);
             const parsed = parseGroqModerationOutput(responseJson);
             if (!parsed) {
-              return reject(new Error("Respuesta de moderación inválida"));
+              return reject(new Error(`Respuesta de moderación inválida: ${data}`));
             }
             resolve(parsed);
           } catch (err) {
+            console.error("Groq parse failed", data);
             reject(err);
           }
         });
