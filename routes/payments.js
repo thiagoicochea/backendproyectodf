@@ -5,12 +5,37 @@ const Payment = require("../models/Payment");
 const Log = require("../models/Log"); 
 const verifyToken = require("../middlewares/verifyToken");
 const isAdmin = require("../middlewares/isAdmin");
+const Product = require("../models/Product");
+const wsBroadcast = require("../utils/wsBroadcast");
 
 router.post("/", verifyToken, async (req, res) => {
     try {
         
         const payment = new Payment(req.body);
         await payment.save();
+
+        const discountProducts = (payment.productos || []).filter((item) => {
+            const quantity = Number(item.quantity || 0);
+            return quantity > 0;
+        });
+
+        if (discountProducts.length) {
+            const selected = discountProducts.sort((a, b) => Number(a.price || 0) - Number(b.price || 0))[0];
+            const productDoc = await Product.findOne({ name: selected.name }).catch(() => null);
+            const hasDiscount = Boolean(productDoc?.discount && Number(productDoc.discount) > 0);
+            if (hasDiscount) {
+                const lowestPrice = Number(productDoc?.price || selected.price || 0);
+                const discountPrice = Math.max(0, lowestPrice - Number(productDoc.discount));
+                wsBroadcast.broadcastPurchaseAlert({
+                    id: `${payment._id || Date.now()}-${selected.name}`,
+                    customer: payment.cliente || "Un cliente",
+                    product: selected.name,
+                    price: discountPrice,
+                    priceLabel: `S/. ${discountPrice}`,
+                    message: `Aprovecha esta oferta y lleva ${selected.name} con descuento.`
+                });
+            }
+        }
 
         // Capturar datos de seguridad para el Log
         // Si están en producción (Render), req.headers['x-forwarded-for'] trae la IP real

@@ -2,10 +2,12 @@ const https = require("https");
 const ChatMessage = require("../models/ChatMessage");
 const ChatRoom = require("../models/ChatRoom");
 const User = require("../models/User");
+const { createSupportSession, buildSupportBotReply } = require("./supportBot");
 
 let wss;
 const roomUsers = {};
 const activeConnections = new Map();
+const supportSessions = new Map();
 
 const setWss = (server) => {
   wss = server;
@@ -186,6 +188,16 @@ const createUserPayload = (socket) => ({
   status: socket.chatBlocked ? "Bloqueado" : "Activo"
 });
 
+const broadcastPurchaseAlert = (payload) => {
+  if (!wss) return;
+  const message = JSON.stringify({ type: "purchase-alert", payload });
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) {
+      client.send(message);
+    }
+  });
+};
+
 const addRoomUser = (roomKey, socket) => {
   if (!roomUsers[roomKey]) roomUsers[roomKey] = [];
   if (!roomUsers[roomKey].some((user) => user.id === socket.id)) {
@@ -236,23 +248,13 @@ const handleClientMessage = async (socket, message) => {
     const previousSocket = activeConnections.get(normalizedUsername);
     if (previousSocket && previousSocket !== socket) {
       try {
-        previousSocket.send(JSON.stringify({ type: "force-disconnect", message: "Se abrió otra sesión del chat" }));
-        previousSocket.close(4000, "duplicate connection");
+        previousSocket.send(JSON.stringify({ type: "presence-update", message: "Se reactivó tu sesión del chat" }));
       } catch (error) {
-        console.warn("No se pudo cerrar la conexión previa", error.message);
+        console.warn("No se pudo notificar la sesión previa", error.message);
       }
     }
 
     socket.userId = userId || socket.userId || null;
-    if (socket.userId) {
-      const userRecord = await User.findById(socket.userId).catch(() => null);
-      socket.chatBlocked = Boolean(userRecord?.chatBlockedUntil && new Date(userRecord.chatBlockedUntil) > new Date());
-      socket.chatBlockedUntil = userRecord?.chatBlockedUntil || null;
-      if (socket.chatBlocked) {
-        return socket.send(JSON.stringify({ type: "error", message: "Tu cuenta está temporalmente bloqueada para chatear" }));
-      }
-    }
-
     if (socket.roomKey && socket.roomKey !== roomKey) {
       removeRoomUser(socket.roomKey, socket);
       broadcastToRoom(socket.roomKey, { type: "user-left", userId: socket.id, username: socket.username });
@@ -263,6 +265,21 @@ const handleClientMessage = async (socket, message) => {
     socket.username = normalizedUsername;
     activeConnections.set(normalizedUsername, socket);
     addRoomUser(roomKey, socket);
+
+    if (roomKey === "support") {
+      const existingSession = supportSessions.get(socket.userId || normalizedUsername) || createSupportSession();
+      supportSessions.set(socket.userId || normalizedUsername, existingSession);
+      socket.send(JSON.stringify({ type: "support-session", session: existingSession }));
+    }
+
+    if (socket.userId) {
+      const userRecord = await User.findById(socket.userId).catch(() => null);
+      socket.chatBlocked = Boolean(userRecord?.chatBlockedUntil && new Date(userRecord.chatBlockedUntil) > new Date());
+      socket.chatBlockedUntil = userRecord?.chatBlockedUntil || null;
+      if (socket.chatBlocked) {
+        return socket.send(JSON.stringify({ type: "error", message: "Tu cuenta está temporalmente bloqueada para chatear" }));
+      }
+    }
 
     socket.send(JSON.stringify({ type: "joined", roomKey }));
     socket.send(JSON.stringify({ type: "room-users", users: getRoomUsers(roomKey) }));
@@ -307,15 +324,19 @@ const handleClientMessage = async (socket, message) => {
     broadcastToRoom(roomKey, { type: "room-message", message: userMessage });
 
     if (roomKey === "support") {
-      const supportResponse = await sendGroqSupportAnswer(text);
+      const sessionKey = socket.userId || socket.username;
+      const session = supportSessions.get(sessionKey) || createSupportSession();
+      supportSessions.set(sessionKey, session);
+      const supportResponseText = buildSupportBotReply(text, session);
       const assistantMessage = await ChatMessage.create({
         roomKey,
         userId: null,
-        username: "NendoShop Support",
-        text: supportResponse.text,
+        username: "NendoBot",
+        text: supportResponseText,
         role: "assistant"
       });
       broadcastToRoom(roomKey, { type: "room-message", message: assistantMessage });
+      socket.send(JSON.stringify({ type: "support-session", session }));
     }
 
     return;
@@ -368,5 +389,6 @@ module.exports = {
   setWss,
   handleClientMessage,
   handleClientDisconnect,
-  broadcastToRoom
+  broadcastToRoom,
+  broadcastPurchaseAlert
 };
