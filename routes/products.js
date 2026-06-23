@@ -23,23 +23,30 @@ const extractGroqKey = (value) => {
 const parseGroqModerationOutput = (responseJson) => {
   if (!responseJson) return null;
 
-  let text = responseJson.output_text;
+  const extractText = (item) => {
+    if (!item) return "";
+    if (typeof item.output_text === "string") return item.output_text;
+    if (typeof item.text === "string") return item.text;
+    if (Array.isArray(item.content)) {
+      return item.content
+        .map((contentItem) => contentItem.text || "")
+        .join("");
+    }
+    if (Array.isArray(item.output)) {
+      return item.output
+        .map((nestedItem) => extractText(nestedItem))
+        .join("");
+    }
+    return "";
+  };
+
+  let text = extractText(responseJson);
 
   if (!text && Array.isArray(responseJson.output)) {
     text = responseJson.output
-      .map((item) => {
-        if (!item?.content) return "";
-        return item.content
-          .map((contentItem) => contentItem.text || "")
-          .join("");
-      })
-      .join("");
-  }
-
-  if (!text && responseJson.output?.[0]?.content) {
-    text = responseJson.output[0].content
-      .map((contentItem) => contentItem.text || "")
-      .join("");
+      .map((item) => extractText(item))
+      .filter(Boolean)
+      .join("\n");
   }
 
   if (!text) return null;
