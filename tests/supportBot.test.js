@@ -34,6 +34,12 @@ test('buildSupportBotReply personalizes the welcome response with the customer n
   assert.match(reply, /No pedir/i);
 });
 
+test('checkTextSafety blocks obfuscated profanity variants', async () => {
+  const result = await checkTextSafety('p u t a');
+  assert.equal(result.allowed, false);
+  assert.equal(result.block, true);
+});
+
 test('buildSupportBotReply can end the conversation gracefully', async () => {
   const session = createSupportSession();
   await buildSupportBotReply('hola', session);
