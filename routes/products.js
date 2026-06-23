@@ -61,7 +61,12 @@ const moderateCommentWithGroq = (apiKey, comment) => {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify({
       model: "openai/gpt-oss-20b",
-      input: `Eres un moderador de comentarios. Devuelve únicamente un JSON válido con estas llaves: allowed, block, category, reason. Si el comentario es inapropiado, block debe ser true y allowed debe ser false. Aquí está el comentario: "${comment}"`,
+      input: `Eres un clasificador de comentarios en español. Responde únicamente con un JSON válido con las llaves: allowed, block, category, reason.
+- Si el comentario es una opinión, márcalo como "apropiado" siempre que no contenga insultos directos, amenazas, agresividad explícita o contenido sexual/pornográfico explícito.
+- Si el comentario incluye insultos, lenguaje sexual explícito, pornografía, agresividad o amenazas, márcalo como "inapropiado".
+- Usa únicamente las categorías "apropiado" o "inapropiado".
+- El campo reason debe ser una explicación corta y directa.
+Aquí está el comentario: "${comment}"`,
       max_output_tokens: 500
     });
 
