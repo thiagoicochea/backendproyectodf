@@ -59,57 +59,82 @@ const parseGroqModerationOutput = (responseJson) => {
 
 const moderateCommentWithGroq = (apiKey, comment) => {
   return new Promise((resolve, reject) => {
-    const payload = JSON.stringify({
-      model: "openai/gpt-oss-20b",
-      input: `Eres un clasificador de comentarios en español. Responde únicamente con un JSON válido con las llaves: allowed, block, category, reason.
-- Si el comentario es una opinión, márcalo como "apropiado" siempre que no contenga insultos directos, amenazas, agresividad explícita o contenido sexual/pornográfico explícito.
-- Si el comentario incluye insultos, lenguaje sexual explícito, pornografía, agresividad o amenazas, márcalo como "inapropiado".
-- Usa únicamente las categorías "apropiado" o "inapropiado".
-- El campo reason debe ser una explicación corta y directa.
-Aquí está el comentario: "${comment}"`,
-      max_output_tokens: 500
-    });
-
-    const request = https.request(
-      {
-        hostname: "api.groq.com",
-        path: "/openai/v1/responses",
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`
-        }
-      },
-      (res) => {
-        let data = "";
-
-        res.on("data", (chunk) => {
-          data += chunk;
+    // Try up to 3 attempts to get a parsable moderation response. Set temperature=0 for deterministic output.
+    const makeRequest = (attempt) => {
+      return new Promise((resolveReq, rejectReq) => {
+        const payload = JSON.stringify({
+          model: "openai/gpt-oss-20b",
+          input: `Eres un clasificador de comentarios en español. Responde únicamente con un JSON válido con las llaves: allowed, block, category, reason.\n- Si el comentario es una opinión, márcalo como "apropiado" siempre que no contenga insultos directos, amenazas, agresividad explícita o contenido sexual/pornográfico explícito.\n- Si el comentario incluye insultos, lenguaje sexual explícito, pornografía, agresividad o amenazas, márcalo como "inapropiado".\n- Usa únicamente las categorías "apropiado" o "inapropiado".\n- El campo reason debe ser una explicación corta y directa.\nAquí está el comentario: "${comment}"`,
+          temperature: 0,
+          max_output_tokens: 500
         });
 
-        res.on("end", () => {
-          if (res.statusCode < 200 || res.statusCode >= 300) {
-            return reject(new Error(`Groq API error ${res.statusCode}: ${data}`));
-          }
-
-          try {
-            const responseJson = JSON.parse(data);
-            const parsed = parseGroqModerationOutput(responseJson);
-            if (!parsed) {
-              return reject(new Error(`Respuesta de moderación inválida: ${data}`));
+        const request = https.request(
+          {
+            hostname: "api.groq.com",
+            path: "/openai/v1/responses",
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`
             }
-            resolve(parsed);
-          } catch (err) {
-            console.error("Groq parse failed", data);
-            reject(err);
-          }
-        });
-      }
-    );
+          },
+          (res) => {
+            let data = "";
 
-    request.on("error", (err) => reject(err));
-    request.write(payload);
-    request.end();
+            res.on("data", (chunk) => {
+              data += chunk;
+            });
+
+            res.on("end", () => {
+              if (res.statusCode < 200 || res.statusCode >= 300) {
+                return rejectReq(new Error(`Groq API error ${res.statusCode}`));
+              }
+
+              let responseJson;
+              try {
+                responseJson = JSON.parse(data);
+              } catch (err) {
+                console.error("Groq response not JSON", err.message, { attempt });
+                return rejectReq(new Error("Respuesta de moderación inválida"));
+              }
+
+              const parsed = parseGroqModerationOutput(responseJson);
+              if (!parsed) {
+                console.warn("Groq parse returned null", { attempt });
+                return rejectReq(new Error("Respuesta de moderación inválida"));
+              }
+
+              resolveReq(parsed);
+            });
+          }
+        );
+
+        request.on("error", (err) => rejectReq(err));
+        request.write(payload);
+        request.end();
+      });
+    };
+
+    (async () => {
+      const maxAttempts = 3;
+      for (let i = 1; i <= maxAttempts; i++) {
+        try {
+          const result = await makeRequest(i);
+          return resolve(result);
+        } catch (err) {
+          console.warn(`Moderation attempt ${i} failed:`, err.message);
+          if (i < maxAttempts) {
+            // small backoff
+            await new Promise((r) => setTimeout(r, 300 * i));
+            continue;
+          }
+          // after retries, fallback: treat as allowed but log clearly
+          console.error("Moderation failed after retries; falling back to allow", { error: err.message });
+          return resolve({ allowed: true, block: false, category: "apropiado", reason: "Moderación fallida; tratado como apropiado" });
+        }
+      }
+    })();
   });
 };
 
