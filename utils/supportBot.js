@@ -1,3 +1,5 @@
+const Payment = require("../models/Payment");
+
 const SUPPORT_INTRO = `Hola, soy NendoBot, tu asistente de soporte de NendoShop. Te puedo ayudar con pedidos, pagos, envíos, devoluciones y cuentas.`;
 
 const createSupportSession = () => ({
@@ -14,7 +16,7 @@ const extractOrderNumber = (text) => {
   return fallback ? fallback[1] : null;
 };
 
-const buildSupportBotReply = (input, session) => {
+const buildSupportBotReply = async (input, session) => {
   const text = String(input || '').trim().toLowerCase();
   if (!session) {
     return `${SUPPORT_INTRO}\n\n1) Pedidos y envíos\n2) Pagos y promociones\n3) Devoluciones y cambios\n4) Cuenta y acceso`;
@@ -56,6 +58,11 @@ const buildSupportBotReply = (input, session) => {
   if (session.step === 'order') {
     const orderNumber = extractOrderNumber(text);
     if (orderNumber) {
+      const payment = await Payment.findOne({ documento: orderNumber }).catch(() => null);
+      if (payment) {
+        session.step = 'order-confirmed';
+        return `Gracias. He verificado el pedido ${orderNumber}: está ${payment.estado || 'Pagado'} y el total es S/. ${payment.total || 0}. Si quieres, puedo ayudarte con seguimiento, cambios o devoluciones.`;
+      }
       session.step = 'order-confirmed';
       return `Gracias. He verificado el pedido ${orderNumber}: está en preparación, ya pasó por el almacén y saldrá para entrega en las próximas horas. Si quieres, puedo ayudarte con el seguimiento o con un cambio.`;
     }

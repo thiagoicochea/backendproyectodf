@@ -38,7 +38,11 @@ const moderateChatText = async (text) => {
   }
 
   const lower = cleanText.toLowerCase();
-  const suspiciousWords = ["insulto", "idiota", "tonto", "puta", "puta", "mierda", "sexo", "porn", "amenaza", "matar", "mata", "kill", "fuck", "shit", "bitch"];
+  const suspiciousWords = [
+    "insulto", "idiota", "tonto", "estupido", "estúpido", "puta", "puta", "mierda", "sexo", "porn", "amenaza", "matar", "mata", "kill", "fuck", "shit", "bitch",
+    "coño", "concha", "pendejo", "pendeja", "zorra", "perra", "verga", "chingar", "culero", "culera", "gil", "idiota", "imbecil", "maldito", "maldita",
+    "vagina", "penis", "ano", "ano", "fluidos", "semen", "sangre", "masturb", "orgasmo", "nazi", "terror"
+  ];
   const shouldBlock = suspiciousWords.some((word) => lower.includes(word));
   if (shouldBlock) {
     return { allowed: false, block: true, category: "inapropiado", reason: "Contenido inapropiado detectado" };
@@ -313,9 +317,10 @@ const handleClientMessage = async (socket, message) => {
       return socket.send(JSON.stringify({ type: "error", message: moderation.reason || "Tu mensaje fue bloqueado por moderación" }));
     }
 
-    const userAvatar = socket.userId
-      ? (await User.findById(socket.userId).catch(() => null))?.profileImg || ""
-      : "";
+    const userRecord = socket.userId
+      ? (await User.findById(socket.userId).catch(() => null))
+      : null;
+    const userAvatar = userRecord?.profileImg || "";
 
     const userMessage = await ChatMessage.create({
       roomKey,
