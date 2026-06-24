@@ -6,13 +6,27 @@ const Log = require("../models/Log");
 const verifyToken = require("../middlewares/verifyToken");
 const isAdmin = require("../middlewares/isAdmin");
 const Product = require("../models/Product");
+const User = require("../models/User");
 const wsBroadcast = require("../utils/wsBroadcast");
 
 router.post("/", verifyToken, async (req, res) => {
     try {
-        
-        const payment = new Payment(req.body);
+        const { saveCard, paymentmethod, ...paymentBody } = req.body;
+        const payment = new Payment(paymentBody);
         await payment.save();
+
+        if (saveCard && paymentmethod && req.user?.id) {
+            const user = await User.findById(req.user.id);
+            if (user) {
+                user.paymentmethod = {
+                    nombretarjeta: paymentmethod.nombretarjeta || user.paymentmethod?.nombretarjeta || "",
+                    numerotarjeta: paymentmethod.numerotarjeta || user.paymentmethod?.numerotarjeta || "",
+                    cvv: paymentmethod.cvv || user.paymentmethod?.cvv || "",
+                    tipo: paymentmethod.tipo || user.paymentmethod?.tipo || "visa"
+                };
+                await user.save();
+            }
+        }
 
         const discountProducts = (payment.productos || []).filter((item) => {
             const quantity = Number(item.quantity || 0);
