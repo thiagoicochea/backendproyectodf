@@ -27,7 +27,8 @@ router.post("/", verifyToken, async (req, res) => {
                 if (!hasDiscount) continue;
 
                 const basePrice = Number(productDoc?.price || item.price || 0);
-                const discountAmount = Number(productDoc.discount || 0);
+                const discountRate = Number(productDoc.discount || 0);
+                const discountAmount = discountRate > 1 ? discountRate : basePrice * discountRate;
                 const discountPrice = Math.max(0, basePrice - discountAmount);
                 discountedCandidates.push({
                     name: item.name,

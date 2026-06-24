@@ -320,7 +320,7 @@ Escribe ahora el siguiente mensaje de NendoBot dirigido al cliente.`;
 
 const fallbackTemplate = ({ customerName, stage, facts }) => {
   if (stage === "welcome") {
-    return `Hola ${customerName}, soy NendoBot, asesor de NendoShop. Puedo ayudarte con pedidos, productos, devoluciones y cuenta. Si lo prefieres, puedes decirme 1 para pedidos, 2 para productos, 3 para devoluciones o 4 para tu cuenta.`;
+    return `Hola ${customerName}, soy NendoBot, asesor de NendoShop. Puedo ayudarte con pedidos, productos, devoluciones y cuenta. Si lo prefieres, puedes decirme 1) pedidos, 2) productos, 3) devoluciones o 4) tu cuenta.`;
   }
   if (facts?.tipo === "producto") {
     const [p] = facts.productos || [];
@@ -338,10 +338,10 @@ const fallbackTemplate = ({ customerName, stage, facts }) => {
     return `No encontré ese número de pedido, ${customerName}. ¿Puedes confirmarlo?`;
   }
   if (stage === "survey_intro") {
-    return `Gracias por contactarnos, ${customerName}. ¿Podrías calificar nuestra atención del 1 al 5?`;
+    return `Gracias por contactarnos, ${customerName}. ¿Podrías calificar nuestra atención del 1 al 5 para ayudarnos a mejorar?`;
   }
   if (stage === "closing") {
-    return `Gracias por tu respuesta, ${customerName}. Cerramos esta conversación; escríbenos cuando lo necesites.`;
+    return `Gracias por tu respuesta, ${customerName}. Cerramos esta conversación con satisfacción; escríbenos cuando lo necesites.`;
   }
   return `Gracias por tu mensaje, ${customerName}. ¿Podrías darme más detalles para ayudarte mejor?`;
 };
