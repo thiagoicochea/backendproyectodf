@@ -10,6 +10,7 @@ const { Resend } = require("resend");
 const resendClient = new Resend(process.env.RESEND_API_KEY);
 
 const User = require("../models/User");
+const verifyToken = require("../middlewares/verifyToken");
 const { recordLog } = require("../utils/logger");
 const { validateRegistrationPayload } = require("../utils/validation");
 
@@ -18,6 +19,7 @@ const RESEND_WAIT_MS = 30 * 1000;
 const BLOCK_DURATION_MS = 2 * 60 * 1000;
 const MAX_VERIFY_ATTEMPTS = 3;
 const pendingRegistrations = new Map();
+const pendingPasswordChanges = new Map();
 
 const generateCode = () => String(Math.floor(100000 + Math.random() * 900000));
 const generateTempToken = () => crypto.randomBytes(24).toString("hex");
@@ -116,6 +118,19 @@ router.post("/login", async (req, res) => {
     if (!user) {
       await recordLog({ req, usuario: req.body.email, descripcion: "Intento de login con correo no registrado", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
       return res.status(401).json({ message: "Usuario no encontrado" });
+    }
+
+    if (user.role === "admin" && req.body.loginContext !== "admin") {
+      await recordLog({ req, usuario: user.email, descripcion: "Intento de login de administrador desde el login general", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
+      return res.status(403).json({
+        message: "El acceso administrativo solo está permitido desde el panel dedicado.",
+        requiresAdminAccess: true
+      });
+    }
+
+    if (user.role !== "admin" && req.body.loginContext === "admin") {
+      await recordLog({ req, usuario: user.email, descripcion: "Intento de acceso de usuario al panel administrativo", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
+      return res.status(403).json({ message: "No tienes permisos de administrador" });
     }
 
     const validPassword = await bcrypt.compare(req.body.password, user.password);
@@ -217,13 +232,45 @@ router.post("/resend-2fa", async (req, res) => {
 
 router.post("/verify-2fa", async (req, res) => {
   try {
-    const { email, tempToken, code, pendingRegistration, forgotPassword, newPassword } = req.body;
+    const { email, tempToken, code, pendingRegistration, forgotPassword, newPassword, pendingPasswordChange } = req.body;
 
     if (!email || !tempToken || !code) {
       return res.status(400).json({ message: "Email, token y código son requeridos" });
     }
 
     const pendingEntry = pendingRegistrations.get(tempToken) || pendingRegistration;
+    const pendingChangeEntry = pendingPasswordChanges.get(tempToken) || pendingPasswordChange;
+
+    if (pendingChangeEntry) {
+      const user = await User.findOne({ email: pendingChangeEntry.email || email });
+      if (!user) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      if (user.twoFactorTempToken !== tempToken) {
+        return res.status(401).json({ message: "Token de verificación inválido" });
+      }
+
+      const now = new Date();
+      if (!user.twoFactorCode || !user.twoFactorExpires || user.twoFactorExpires < now || user.twoFactorCode !== code) {
+        return res.status(401).json({ message: "Código incorrecto o expirado" });
+      }
+
+      user.password = await bcrypt.hash(pendingChangeEntry.newPassword, 10);
+      user.twoFactorCode = null;
+      user.twoFactorExpires = null;
+      user.twoFactorTempToken = null;
+      user.twoFactorAttempts = 0;
+      user.twoFactorBlockedUntil = null;
+      user.twoFactorLastSentAt = null;
+      user.twoFactorMethod = null;
+      await user.save();
+      pendingPasswordChanges.delete(tempToken);
+
+      await recordLog({ req, usuario: user.email, descripcion: "Contraseña actualizada tras verificación en dos pasos", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
+
+      return res.json({ message: "Contraseña actualizada correctamente" });
+    }
 
     if (forgotPassword) {
       const user = await User.findOne({ email });
@@ -383,6 +430,56 @@ router.post("/verify-2fa", async (req, res) => {
   }
 });
 
+router.post("/change-password-request", verifyToken, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: "Contraseña actual y nueva son requeridas" });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: "Usuario no encontrado" });
+    }
+
+    const validPassword = await bcrypt.compare(currentPassword, user.password);
+    if (!validPassword) {
+      return res.status(401).json({ message: "La contraseña actual es incorrecta" });
+    }
+
+    const code = generateCode();
+    const tempToken = generateTempToken();
+    const now = new Date();
+
+    pendingPasswordChanges.set(tempToken, {
+      email: user.email,
+      newPassword,
+      kind: "change"
+    });
+
+    await sendTwoFactorCode(user, "email", code);
+    user.twoFactorCode = code;
+    user.twoFactorMethod = "email";
+    user.twoFactorTempToken = tempToken;
+    user.twoFactorExpires = new Date(now.getTime() + OTP_EXPIRE_MS);
+    user.twoFactorLastSentAt = now;
+    user.twoFactorAttempts = 0;
+    user.twoFactorBlockedUntil = null;
+    await user.save();
+
+    await recordLog({ req, usuario: user.email, descripcion: "Solicitud de cambio de contraseña iniciada", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
+
+    return res.json({
+      message: "Verifica tu correo para confirmar el cambio de contraseña",
+      tempToken,
+      twoFactorRequired: true
+    });
+  } catch (error) {
+    res.status(500).json(error);
+  }
+});
+
 router.post("/forgot-password", async (req, res) => {
   try {
     const { email, newPassword } = req.body;
@@ -399,6 +496,12 @@ router.post("/forgot-password", async (req, res) => {
     const code = generateCode();
     const tempToken = generateTempToken();
     const now = new Date();
+
+    pendingPasswordChanges.set(tempToken, {
+      email: user.email,
+      newPassword,
+      kind: "forgot"
+    });
 
     user.twoFactorCode = code;
     user.twoFactorMethod = "email";

@@ -106,7 +106,7 @@ const handleClientMessage = async (socket, message) => {
     targetUser.chatReportCount = (targetUser.chatReportCount || 0) + 1;
     if (targetUser.chatReportCount >= 10) {
       targetUser.chatBlockedUntil = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30);
-      targetUser.chatBlockReason = message.reason || "Reporte acumulado";
+      targetUser.chatBlockReason = message.reasonType || "reporte";
     }
     await targetUser.save();
 
