@@ -212,6 +212,7 @@ const CLASSIFICATION_PROMPT = (text) => `Eres un clasificador para el chatbot de
 Reglas de moderación:
 - Si el mensaje contiene insultos, amenazas, acoso, lenguaje sexual explícito o contenido violento: allowed=false, block=true, category="inapropiado".
 - En cualquier otro caso: allowed=true, block=false, category="apropiado".
+- Para moderar debes tener en cuenta sinonimos  y las palabras sexuales como los oparatos reproductos, fluidos y insultos especializados.
 
 Intents posibles (elige exactamente uno):
 - "saludo": el cliente solo saluda o inicia la conversación.
