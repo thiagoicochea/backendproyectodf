@@ -20,6 +20,7 @@ const BLOCK_DURATION_MS = 2 * 60 * 1000;
 const MAX_VERIFY_ATTEMPTS = 3;
 const pendingRegistrations = new Map();
 const pendingPasswordChanges = new Map();
+const pendingProfileUpdates = new Map();
 
 const generateCode = () => String(Math.floor(100000 + Math.random() * 900000));
 const generateTempToken = () => crypto.randomBytes(24).toString("hex");
@@ -232,7 +233,7 @@ router.post("/resend-2fa", async (req, res) => {
 
 router.post("/verify-2fa", async (req, res) => {
   try {
-    const { email, tempToken, code, pendingRegistration, forgotPassword, newPassword, pendingPasswordChange } = req.body;
+    const { email, tempToken, code, pendingRegistration, forgotPassword, newPassword, pendingPasswordChange, pendingProfileUpdate } = req.body;
 
     if (!email || !tempToken || !code) {
       return res.status(400).json({ message: "Email, token y código son requeridos" });
@@ -240,6 +241,7 @@ router.post("/verify-2fa", async (req, res) => {
 
     const pendingEntry = pendingRegistrations.get(tempToken) || pendingRegistration;
     const pendingChangeEntry = pendingPasswordChanges.get(tempToken) || pendingPasswordChange;
+    const pendingProfileEntry = pendingProfileUpdates.get(tempToken) || pendingProfileUpdate;
 
     if (pendingChangeEntry) {
       const user = await User.findOne({ email: pendingChangeEntry.email || email });
@@ -270,6 +272,46 @@ router.post("/verify-2fa", async (req, res) => {
       await recordLog({ req, usuario: user.email, descripcion: "Contraseña actualizada tras verificación en dos pasos", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
 
       return res.json({ message: "Contraseña actualizada correctamente" });
+    }
+
+    if (pendingProfileEntry) {
+      const user = await User.findOne({ email: pendingProfileEntry.email || email });
+      if (!user) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      if (user.twoFactorTempToken !== tempToken) {
+        return res.status(401).json({ message: "Token de verificación inválido" });
+      }
+
+      const now = new Date();
+      if (!user.twoFactorCode || !user.twoFactorExpires || user.twoFactorExpires < now || user.twoFactorCode !== code) {
+        return res.status(401).json({ message: "Código incorrecto o expirado" });
+      }
+
+      const payload = pendingProfileEntry.payload || pendingProfileEntry;
+      user.name = payload.name || user.name;
+      user.lastname = payload.lastname || user.lastname;
+      user.phone = payload.phone || user.phone;
+      user.address = payload.address || user.address;
+      user.city = payload.city || user.city;
+      user.birthdate = payload.birthdate || user.birthdate;
+      user.sex = payload.sex || user.sex;
+      user.profileImg = payload.profileImg || user.profileImg;
+      user.paymentmethod = payload.paymentmethod || user.paymentmethod;
+      user.twoFactorCode = null;
+      user.twoFactorExpires = null;
+      user.twoFactorTempToken = null;
+      user.twoFactorAttempts = 0;
+      user.twoFactorBlockedUntil = null;
+      user.twoFactorLastSentAt = null;
+      user.twoFactorMethod = null;
+      await user.save();
+      pendingProfileUpdates.delete(tempToken);
+
+      await recordLog({ req, usuario: user.email, descripcion: "Perfil actualizado tras verificación en dos pasos", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
+
+      return res.json({ message: "Perfil actualizado correctamente", user: { id: user._id, name: user.name, email: user.email, role: user.role, profileImg: user.profileImg } });
     }
 
     if (forgotPassword) {
@@ -424,6 +466,50 @@ router.post("/verify-2fa", async (req, res) => {
         role: user.role,
         profileImg: user.profileImg
       }
+    });
+  } catch (error) {
+    res.status(500).json(error);
+  }
+});
+
+router.post("/profile-update-request", verifyToken, async (req, res) => {
+  try {
+    const payload = req.body;
+    if (!payload || typeof payload !== "object") {
+      return res.status(400).json({ message: "Datos de perfil inválidos" });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: "Usuario no encontrado" });
+    }
+
+    const code = generateCode();
+    const tempToken = generateTempToken();
+    const now = new Date();
+
+    pendingProfileUpdates.set(tempToken, {
+      email: user.email,
+      payload,
+      kind: "profile"
+    });
+
+    await sendTwoFactorCode(user, "email", code);
+    user.twoFactorCode = code;
+    user.twoFactorMethod = "email";
+    user.twoFactorTempToken = tempToken;
+    user.twoFactorExpires = new Date(now.getTime() + OTP_EXPIRE_MS);
+    user.twoFactorLastSentAt = now;
+    user.twoFactorAttempts = 0;
+    user.twoFactorBlockedUntil = null;
+    await user.save();
+
+    await recordLog({ req, usuario: user.email, descripcion: "Solicitud de actualización de perfil iniciada", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
+
+    return res.json({
+      message: "Verifica tu correo para confirmar los cambios del perfil",
+      tempToken,
+      twoFactorRequired: true
     });
   } catch (error) {
     res.status(500).json(error);
