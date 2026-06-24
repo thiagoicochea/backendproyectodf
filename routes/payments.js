@@ -47,6 +47,9 @@ router.post("/", verifyToken, async (req, res) => {
                 discountedCandidates.push({
                     name: itemName || productDoc?.name || "Producto con descuento",
                     price: discountPrice,
+                    originalPrice: basePrice,
+                    discountPercent: discountValue > 1 ? null : discountValue * 100,
+                    discountAmount: discountValue > 1 ? discountValue : null,
                     productId: productDoc?._id?.toString?.() || item?.productId || null,
                     productDoc
                 });
@@ -61,6 +64,9 @@ router.post("/", verifyToken, async (req, res) => {
                     product: selected.name,
                     productId: selected.productId,
                     price: selected.price,
+                    originalPrice: selected.originalPrice,
+                    discountPercent: selected.discountPercent,
+                    discountAmount: selected.discountAmount,
                     priceLabel: `S/. ${selected.price}`,
                     message: `Aprovecha esta oferta y lleva ${selected.name} con descuento.`
                 });
