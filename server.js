@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const http = require("http");
 const express = require("express");
 const mongoose = require("mongoose");
@@ -10,8 +12,6 @@ const chatRoutes = require("./routes/chatRoutes");
 const ChatRoom = require("./models/ChatRoom");
 
 const PORT = process.env.PORT || 4000;
-
-require("dotenv").config();
 
 const app = express();
 

@@ -1,4 +1,6 @@
-﻿const express = require("express");
+﻿require("dotenv").config();
+
+const express = require("express");
 const router = express.Router();
 
 const bcrypt = require("bcryptjs");
@@ -7,7 +9,8 @@ const https = require("https");
 const crypto = require("crypto");
 const { Resend } = require("resend");
 
-const resendClient = new Resend(process.env.RESEND_API_KEY);
+const resendApiKey = process.env.RESEND_API_KEY;
+const resendClient = resendApiKey ? new Resend(resendApiKey) : null;
 
 const User = require("../models/User");
 const verifyToken = require("../middlewares/verifyToken");
@@ -53,10 +56,15 @@ const sendTwoFactorCode = async (user, method, code) => {
 
   if (sendMethod === "email") {
     const html = generateEmailHtml(user.name || user.email, code);
-    const from = 'Nendoshop <onboarding@resend.dev>';
+    const from = process.env.RESEND_FROM_EMAIL || 'Nendoshop <onboarding@resend.dev>';
     const to = user.email;
     const replyTo = from;
     const text = `Hola ${user.name || user.email},\n\nTu código de verificación es: ${code}.\n\nSi no solicitaste este código, ignora este mensaje.`;
+
+    if (!resendClient) {
+      console.error('[2FA] RESEND_API_KEY no configurada; no se pudo enviar el correo');
+      return { sentBy: 'email', error: true, reason: 'missing_api_key' };
+    }
 
     try {
       const { data } = await resendClient.emails.send({
