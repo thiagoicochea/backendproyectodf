@@ -243,6 +243,54 @@ router.post("/verify-2fa", async (req, res) => {
     const pendingChangeEntry = pendingPasswordChanges.get(tempToken) || pendingPasswordChange;
     const pendingProfileEntry = pendingProfileUpdates.get(tempToken) || pendingProfileUpdate;
 
+    if (pendingEntry) {
+      const now = new Date();
+      if (!pendingEntry.code || !pendingEntry.expiresAt || pendingEntry.expiresAt < now || pendingEntry.code !== code) {
+        return res.status(401).json({ message: "Código incorrecto o expirado" });
+      }
+
+      const existingUser = await User.findOne({ email });
+      if (existingUser) {
+        return res.status(400).json({ message: "El email ya existe" });
+      }
+
+      const user = new User({
+        name: pendingEntry.name,
+        lastname: pendingEntry.lastname,
+        email: pendingEntry.email,
+        password: pendingEntry.password,
+        phone: pendingEntry.phone,
+        address: pendingEntry.address,
+        city: pendingEntry.city,
+        birthdate: pendingEntry.birthdate,
+        sex: pendingEntry.sex,
+        role: "user"
+      });
+
+      await user.save();
+      pendingRegistrations.delete(tempToken);
+      await recordLog({ req, usuario: user.email, descripcion: "Registro completado tras verificación en dos pasos", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
+
+      const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: "7d" });
+      res.cookie("token", token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
+
+      return res.json({
+        message: "Verificación correcta",
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          profileImg: user.profileImg
+        }
+      });
+    }
+
     if (pendingChangeEntry) {
       const user = await User.findOne({ email: pendingChangeEntry.email || email });
       if (!user) {
@@ -342,54 +390,6 @@ router.post("/verify-2fa", async (req, res) => {
       await recordLog({ req, usuario: user.email, descripcion: "Contraseña actualizada tras verificación en dos pasos", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
 
       return res.json({ message: "Contraseña actualizada correctamente" });
-    }
-
-    if (pendingEntry) {
-      const now = new Date();
-      if (!pendingEntry.code || !pendingEntry.expiresAt || pendingEntry.expiresAt < now || pendingEntry.code !== code) {
-        return res.status(401).json({ message: "Código incorrecto o expirado" });
-      }
-
-      const existingUser = await User.findOne({ email });
-      if (existingUser) {
-        return res.status(400).json({ message: "El email ya existe" });
-      }
-
-      const user = new User({
-        name: pendingEntry.name,
-        lastname: pendingEntry.lastname,
-        email: pendingEntry.email,
-        password: pendingEntry.password,
-        phone: pendingEntry.phone,
-        address: pendingEntry.address,
-        city: pendingEntry.city,
-        birthdate: pendingEntry.birthdate,
-        sex: pendingEntry.sex,
-        role: "user"
-      });
-
-      await user.save();
-      pendingRegistrations.delete(tempToken);
-      await recordLog({ req, usuario: user.email, descripcion: "Registro completado tras verificación en dos pasos", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
-
-      const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: "7d" });
-      res.cookie("token", token, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "none",
-        maxAge: 7 * 24 * 60 * 60 * 1000
-      });
-
-      return res.json({
-        message: "Verificación correcta",
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          profileImg: user.profileImg
-        }
-      });
     }
 
     const user = await User.findOne({ email });
