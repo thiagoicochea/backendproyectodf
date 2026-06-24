@@ -63,19 +63,39 @@ router.post("/:id/comments", async (req, res) => {
       return res.status(404).json({ message: "Producto no encontrado" });
     }
 
-    const groqKey = await getGroqApiKey();
-    if (!groqKey) {
-      return res.status(500).json({ message: "No hay clave de Groq configurada" });
-    }
+    const localSafety = String(text || "").trim().toLowerCase();
+    const blockedPatterns = [
+      /\b(sex|sexual|porno|pornografia|nudez|desnudo|masturb|orgias?)\b/i,
+      /\b(violencia|matar|asesinar|golpear|agredir|arma|explosivo|suicida|suicidio)\b/i,
+      /\b(puta|puto|mierda|idiota|estúpido|maldito)\b/i,
+      /\b(terror|bomb|matarte|hacerte daño)\b/i
+    ];
+    const localBlocked = blockedPatterns.some((pattern) => pattern.test(localSafety));
 
-    let moderation;
+    let moderation = {
+      allowed: !localBlocked,
+      block: localBlocked,
+      category: localBlocked ? "inapropiado" : "apropiado",
+      reason: localBlocked ? "Contenido inapropiado" : "Aprobado por filtro local"
+    };
+
     try {
-      console.log("[COMMENTS] calling Groq moderation");
-      moderation = await moderateCommentWithGroq(groqKey, text);
-      console.log("[COMMENTS] groq result", moderation);
+      const groqKey = await getGroqApiKey();
+      if (groqKey) {
+        console.log("[COMMENTS] calling Groq moderation");
+        moderation = await moderateCommentWithGroq(groqKey, text);
+        console.log("[COMMENTS] groq result", moderation);
+      } else {
+        console.warn("[COMMENTS] no hay clave de Groq, usando filtro local");
+      }
     } catch (error) {
       console.error("Moderation error:", error);
-      return res.status(500).json({ message: "Error al verificar el comentario" });
+      moderation = {
+        allowed: !localBlocked,
+        block: localBlocked,
+        category: localBlocked ? "inapropiado" : "apropiado",
+        reason: localBlocked ? "Contenido inapropiado" : "Aprobado por filtro local"
+      };
     }
 
     if (!moderation.allowed || moderation.block) {

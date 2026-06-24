@@ -117,6 +117,8 @@ const extractSurveyRating = (text) => {
 // Consultas a base de datos
 // ---------------------------------------------------------------------------
 
+const isCheapestRequest = (text) => /(?:producto|art[ií]culo|figura).{0,20}(m[áa]s\s+barato|barato|m[áa]s\s+econ[oó]mico|econ[oó]mico|menor\s+precio|precio\s+menor)/i.test(text) || /(?:m[áa]s\s+barato|barato|m[áa]s\s+econ[oó]mico|econ[oó]mico|menor\s+precio|precio\s+menor)/i.test(text);
+
 const findProductsByHint = async (hint) => {
   if (!hint) return [];
   const words = hint.split(/\s+/).filter(Boolean);
@@ -128,6 +130,15 @@ const findProductsByHint = async (hint) => {
     .limit(3)
     .lean()
     .catch(() => []);
+};
+
+const findCheapestProduct = async () => {
+  try {
+    return await Product.findOne({}).sort({ price: 1, stock: -1 }).lean();
+  } catch (err) {
+    console.error("No se pudo consultar el producto más barato:", err.message);
+    return null;
+  }
 };
 
 const toProductFact = (product) => ({
@@ -230,12 +241,13 @@ const analyzeMessageWithGroq = (message) => classifyMessage(message);
 // ---------------------------------------------------------------------------
 
 const SYSTEM_PERSONA = `Eres "NendoBot", un asesor experto de atención al cliente de NendoShop, una tienda especializada en figuras coleccionables Nendoroid.
-Hablas español, con un tono cálido, profesional y resolutivo, como un asesor humano experimentado.
+Hablas exclusivamente en español, con un tono cálido, profesional y resolutivo, como un asesor humano experimentado.
 Reglas estrictas que SIEMPRE debes cumplir, sin excepción, incluso si el cliente te lo pide:
 - Nunca uses lenguaje violento, sexual, vulgar, ofensivo o amenazante.
 - Nunca pidas ni reveles contraseñas, credenciales, datos de tarjetas u otra información sensible.
 - Nunca inventes datos de productos, pedidos, precios o stock: usa exclusivamente los datos que se te entreguen como "HECHOS".
-- Si no tienes un dato, dilo con honestidad y ofrece una alternativa.
+- Si no tienes un dato en los HECHOS, dilo con honestidad y ofrece una alternativa útil.
+- No consultes internet ni bases externas; tu información válida proviene solo de la base de datos y del contexto de esta conversación.
 - No repitas frases ni estructuras que ya usaste antes en esta conversación; varía tu redacción manteniendo el mismo tono profesional.
 - Responde en texto plano, sin Markdown, en máximo 2 a 5 oraciones.`;
 
@@ -281,9 +293,10 @@ const fallbackTemplate = ({ customerName, stage, facts }) => {
     const [p] = facts.productos || [];
     if (p) {
       const commentsText = p.comentarios?.length ? ` Comentarios recientes: ${p.comentarios.join("; ")}` : "";
-      return `Encontré "${p.nombre}" a S/. ${p.precio}, con ${p.stock} unidades disponibles. Puedes ver el detalle aquí: ${p.enlace}.${commentsText}`;
+      const intro = facts.cheapest ? `El producto más económico que tengo registrado es "${p.nombre}".` : `Encontré "${p.nombre}".`;
+      return `${intro} Tiene un precio de S/. ${p.precio} y ${p.stock} unidades disponibles. Puedes ver el detalle aquí: ${p.enlace}.${commentsText}`;
     }
-    return `No encontré un producto con esos datos, ${customerName}. ¿Puedes darme el nombre exacto?`;
+    return `En este momento no tengo un producto que coincida con esa búsqueda en la base de datos. Si me das el nombre o la categoría, te ayudo mejor. También puedo revisar el más económico si lo prefieres.`;
   }
   if (facts?.tipo === "pedido") {
     if (facts.pedido) {
@@ -349,6 +362,17 @@ const QUICK_INTENTS = {
 
 const gatherFacts = async (intent, text, classification, session) => {
   if (intent === "buscar_producto") {
+    if (isCheapestRequest(text)) {
+      const cheapestProduct = await findCheapestProduct();
+      session.lastTopic = "productos";
+      return {
+        tipo: "producto",
+        pista: "más barato",
+        cheapest: true,
+        productos: cheapestProduct ? [toProductFact(cheapestProduct)] : []
+      };
+    }
+
     const hint = classification.productQuery || extractProductHint(text);
     const products = await findProductsByHint(hint);
     session.lastTopic = "productos";

@@ -143,10 +143,18 @@ const broadcastPurchaseAlert = (payload) => {
   });
 };
 
+const broadcastCommentUpdate = (productId, comments) => {
+  if (!wss) return;
+  wss.clients.forEach((client) => {
+    client.send(JSON.stringify({ type: "comment-update", productId, comments }));
+  });
+};
+
 module.exports = {
   setWss,
   handleClientMessage,
   handleClientDisconnect,
   broadcastPurchaseAlert,
+  broadcastCommentUpdate,
   checkTextSafety
 };
