@@ -20,19 +20,33 @@ router.post("/", verifyToken, async (req, res) => {
         });
 
         if (discountProducts.length) {
-            const selected = discountProducts.sort((a, b) => Number(a.price || 0) - Number(b.price || 0))[0];
-            const productDoc = await Product.findOne({ name: selected.name }).catch(() => null);
-            const hasDiscount = Boolean(productDoc?.discount && Number(productDoc.discount) > 0);
-            if (hasDiscount) {
-                const lowestPrice = Number(productDoc?.price || selected.price || 0);
-                const discountPrice = Math.max(0, lowestPrice - Number(productDoc.discount));
+            const discountedCandidates = [];
+            for (const item of discountProducts) {
+                const productDoc = await Product.findOne({ name: item.name }).catch(() => null);
+                const hasDiscount = Boolean(productDoc?.discount && Number(productDoc.discount) > 0);
+                if (!hasDiscount) continue;
+
+                const basePrice = Number(productDoc?.price || item.price || 0);
+                const discountAmount = Number(productDoc.discount || 0);
+                const discountPrice = Math.max(0, basePrice - discountAmount);
+                discountedCandidates.push({
+                    name: item.name,
+                    price: discountPrice,
+                    productId: productDoc?._id?.toString?.() || null,
+                    productDoc
+                });
+            }
+
+            if (discountedCandidates.length) {
+                discountedCandidates.sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
+                const selected = discountedCandidates[0];
                 wsBroadcast.broadcastPurchaseAlert({
                     id: `${payment._id || Date.now()}-${selected.name}`,
                     customer: payment.cliente || "Un cliente",
                     product: selected.name,
-                    productId: productDoc?._id?.toString?.() || null,
-                    price: discountPrice,
-                    priceLabel: `S/. ${discountPrice}`,
+                    productId: selected.productId,
+                    price: selected.price,
+                    priceLabel: `S/. ${selected.price}`,
                     message: `Aprovecha esta oferta y lleva ${selected.name} con descuento.`
                 });
             }
