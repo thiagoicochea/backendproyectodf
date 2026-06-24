@@ -116,6 +116,35 @@ const extractSurveyRating = (text) => {
   return null;
 };
 
+const explainRolePattern = /\b(qué haces|que haces|por qué haces|por que haces|para qué sirves|cuál es tu función|cual es tu funcion|tus funciones|funciones)\b/i;
+const offTopicPattern = /\b(politica|política|deporte|futbol|película|pelicula|serie|noticia|clima|juego|música|musica|viaje|cocina|comida|humor|chiste)\b/i;
+const scopeIntentPattern = /\b(pedido|orden|envío|envio|producto|precio|stock|devolucion|devolución|cambio|cuenta|acceso|contraseña|contrase|credencial|ayuda)\b/i;
+
+const getImmediateSupportReply = ({ text, customerName, intent }) => {
+  const normalized = String(text || "").trim();
+  if (!normalized) return null;
+
+  if (explainRolePattern.test(normalized)) {
+    return `Soy NendoBot, tu asesor de atención al cliente de NendoShop. Puedo ayudarte con pedidos, productos, devoluciones y soporte de cuenta. Si tienes una consulta sobre alguno de esos temas, te ayudo enseguida.`;
+  }
+
+  if (intent === "devolucion") {
+    return /pedido|producto/i.test(normalized)
+      ? `Puedo orientarte sobre devoluciones y cambios. Si me compartes el número de pedido o el producto, te digo qué pasos seguir y si aplica.`
+      : `Puedo orientarte sobre devoluciones y cambios. Si me dices el pedido o el producto, te ayudo a ver si aplica y qué hacer.`;
+  }
+
+  if (intent === "cuenta") {
+    return `Puedo ayudarte con acceso a tu cuenta, recuperación de datos o cambios básicos. No pediré tu contraseña; si me explicas el problema, te guío paso a paso.`;
+  }
+
+  if (offTopicPattern.test(normalized) || (!scopeIntentPattern.test(normalized) && /\b(quiero|necesito|puedes|ayuda|dime|habl|como)\b/i.test(normalized))) {
+    return `Mi función es ayudarte con pedidos, productos, devoluciones y cuenta en NendoShop. Si tu consulta es de otro tema, esa no es mi finalidad.`;
+  }
+
+  return null;
+};
+
 // ---------------------------------------------------------------------------
 // Consultas a base de datos
 // ---------------------------------------------------------------------------
@@ -451,6 +480,18 @@ const getSupportBotReply = async (input, session) => {
   }
 
   pushHistory(session, "user", text);
+
+  const quickClassification = fallbackClassification(text);
+  const immediateReply = getImmediateSupportReply({
+    text,
+    customerName,
+    intent: quickClassification.intent
+  });
+
+  if (immediateReply) {
+    pushHistory(session, "bot", immediateReply);
+    return immediateReply;
+  }
 
   // Atajo: si escriben justo "1"-"4", no hace falta gastar una llamada de
   // clasificación para saber la intención.

@@ -56,3 +56,17 @@ test('buildSupportBotReply asks for a satisfaction survey before closing', async
   assert.match(closingReply, /satisfacción/i);
   assert.match(closingReply, /gracias/i);
 });
+
+test('buildSupportBotReply explains its role when asked', async () => {
+  const session = createSupportSession();
+  const reply = await buildSupportBotReply('¿por qué haces esto?', session);
+  assert.match(reply, /NendoBot/i);
+  assert.match(reply, /pedidos/i);
+});
+
+test('buildSupportBotReply clarifies scope for unrelated questions', async () => {
+  const session = createSupportSession();
+  const reply = await buildSupportBotReply('¿qué pasa con el clima hoy?', session);
+  assert.match(reply, /mi función/i);
+  assert.match(reply, /no es mi finalidad/i);
+});
