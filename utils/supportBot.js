@@ -269,22 +269,13 @@ const classifyMessage = async (text) => {
 };
 
 const moderateCommunityMessage = async (text) => {
-  const localSafety = checkTextSafety(text);
-  if (localSafety.block) {
-    return {
-      allowed: false,
-      block: true,
-      category: "inapropiado",
-      reason: localSafety.reason || "Mensaje no permitido."
-    };
-  }
-
   const aiResult = await classifyMessage(text);
+
   return {
-    allowed: Boolean(aiResult?.allowed !== false),
-    block: Boolean(aiResult?.block === true),
-    category: aiResult?.category === "inapropiado" ? "inapropiado" : "apropiado",
-    reason: aiResult?.reason || "Mensaje aceptado."
+    allowed: aiResult?.allowed !== false,
+    block: aiResult?.block === true,
+    category: aiResult?.category || "apropiado",
+    reason: aiResult?.reason || "IA moderation"
   };
 };
 
