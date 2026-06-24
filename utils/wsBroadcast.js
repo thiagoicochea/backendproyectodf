@@ -1,6 +1,6 @@
 const ChatMessage = require("../models/ChatMessage");
 const User = require("../models/User");
-const { buildSupportBotReply, createSupportSession, checkTextSafety } = require("./supportBot");
+const { buildSupportBotReply, createSupportSession, moderateCommunityMessage } = require("./supportBot");
 const { recordLog } = require("../utils/logger");
 
 let wss = null;
@@ -131,23 +131,33 @@ const handleClientMessage = async (socket, message) => {
     const normalizedText = String(text || "").trim();
     if (!normalizedText) return;
 
-    if (roomKey === "community") {
-      const safety = await checkTextSafety(normalizedText);
-      if (!safety.allowed) {
-        socket.send(JSON.stringify({ type: "error", message: safety.reason || "Mensaje no permitido." }));
-        return;
-      }
-    }
+  let messageMeta = {};
 
-    const savedMessage = await persistMessage({
-      roomKey,
-      userId: userId || socket.userId || null,
-      username: username || socket.username || "Usuario",
-      text: normalizedText,
-      profileImg: profileImg || socket.profileImg || "",
-      role: "user"
-    });
+if (roomKey === "community") {
+  const moderation = await moderateCommunityMessage(normalizedText);
 
+  if (!moderation.allowed) {
+    socket.send(JSON.stringify({
+      type: "error",
+      message: moderation.reason || "Mensaje no permitido."
+    }));
+    return;
+  }
+
+  messageMeta = {
+    moderation
+  };
+}
+
+   const savedMessage = await persistMessage({
+  roomKey,
+  userId: userId || socket.userId || null,
+  username: username || socket.username || "Usuario",
+  text: normalizedText,
+  profileImg: profileImg || socket.profileImg || "",
+  role: "user",
+  meta: messageMeta
+});
     broadcastToRoom(roomKey, { type: "room-message", message: savedMessage });
 
     if (roomKey === "support") {
@@ -190,5 +200,5 @@ module.exports = {
   handleClientDisconnect,
   broadcastPurchaseAlert,
   broadcastCommentUpdate,
-  checkTextSafety
+  moderateCommunityMessage
 };

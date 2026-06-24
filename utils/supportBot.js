@@ -268,6 +268,26 @@ const classifyMessage = async (text) => {
   }
 };
 
+const moderateCommunityMessage = async (text) => {
+  const localSafety = checkTextSafety(text);
+  if (localSafety.block) {
+    return {
+      allowed: false,
+      block: true,
+      category: "inapropiado",
+      reason: localSafety.reason || "Mensaje no permitido."
+    };
+  }
+
+  const aiResult = await classifyMessage(text);
+  return {
+    allowed: Boolean(aiResult?.allowed !== false),
+    block: Boolean(aiResult?.block === true),
+    category: aiResult?.category === "inapropiado" ? "inapropiado" : "apropiado",
+    reason: aiResult?.reason || "Mensaje aceptado."
+  };
+};
+
 // Wrapper de compatibilidad por si algo más en el proyecto importa el nombre
 // anterior. La versión original nunca llegaba a hacer la llamada HTTP.
 const analyzeMessageWithGroq = (message) => classifyMessage(message);
@@ -541,5 +561,6 @@ module.exports = {
   extractOrderNumber,
   extractProductHint,
   findProductsByHint,
+  moderateCommunityMessage,
   analyzeMessageWithGroq // wrapper de compatibilidad — usa classifyMessage internamente
 };
