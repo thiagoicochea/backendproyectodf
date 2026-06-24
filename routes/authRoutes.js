@@ -29,14 +29,8 @@ const generateCode = () => String(Math.floor(100000 + Math.random() * 900000));
 const generateTempToken = () => crypto.randomBytes(24).toString("hex");
 const normalizeEmail = (value) => (value || "").trim().toLowerCase();
 const getResendFromAddress = () => {
-  const raw = (process.env.RESEND_FROM_EMAIL || "").trim();
-  if (!raw || !raw.includes("@")) return null;
-
-  const [localPart, domain] = raw.split("@");
-  if (!localPart || !domain || domain.toLowerCase().includes("resend.dev")) {
-    return null;
-  }
-
+  const raw = (process.env.RESEND_FROM_EMAIL || "Nendoshop <noreply@nendoshop.onrender.com>").trim();
+  if (!raw || !raw.includes("@")) return "Nendoshop <noreply@nendoshop.onrender.com>";
   return raw;
 };
 
