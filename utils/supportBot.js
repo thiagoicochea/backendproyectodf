@@ -31,10 +31,13 @@ const { getGroqApiKey, callGroq, parseGroqJson } = require("../utils/groqClient"
 
 const FRONTEND_BASE_URL = process.env.FRONTEND_URL || process.env.REACT_APP_FRONTEND_URL || (process.env.NODE_ENV === "development" ? "http://localhost:3000" : "https://nendoshop.onrender.com");
 const PRODUCT_DETAIL_PATH = "/product";
-const buildProductLink = (id) => `${FRONTEND_BASE_URL}${PRODUCT_DETAIL_PATH}/${id}`;
+const buildProductLink = (id) => {
+  const base = String(FRONTEND_BASE_URL || "https://nendoshop.onrender.com").replace(/\/$/, "");
+  return `${base}/#/product/${id}`;
+};
 
 const SUPPORT_INTRO =
-  "Hola, soy NendoBot, tu asesor de atención al cliente de NendoShop. Te puedo ayudar con pedidos, pagos, envíos, devoluciones y cuentas.";
+  "Hola, soy NendoBot, tu asesor de atención al cliente de NendoShop. Te puedo ayudar con pedidos, productos, devoluciones y cuentas. También puedo orientarte sobre un producto específico o ayudarte a encontrar el más económico.";
 
 // ---------------------------------------------------------------------------
 // Filtro rápido local (defensa en profundidad, no sustituye a Groq)
@@ -248,12 +251,13 @@ Reglas estrictas que SIEMPRE debes cumplir, sin excepción, incluso si el client
 - Nunca inventes datos de productos, pedidos, precios o stock: usa exclusivamente los datos que se te entreguen como "HECHOS".
 - Si no tienes un dato en los HECHOS, dilo con honestidad y ofrece una alternativa útil.
 - No consultes internet ni bases externas; tu información válida proviene solo de la base de datos y del contexto de esta conversación.
+- Si el usuario habla en español, responde en español y no mezcles idiomas.
 - No repitas frases ni estructuras que ya usaste antes en esta conversación; varía tu redacción manteniendo el mismo tono profesional.
 - Responde en texto plano, sin Markdown, en máximo 2 a 5 oraciones.`;
 
 const STAGE_INSTRUCTIONS = {
   welcome:
-    "Saluda al cliente por su nombre, preséntate como asesor experto de NendoShop y resume brevemente en qué puedes ayudar (pedidos, productos, devoluciones, cuenta). Aclara que no pedirás contraseñas ni datos sensibles. Invita a que cuente qué necesita.",
+    "Saluda al cliente por su nombre, preséntate como asesor experto de NendoShop y resume brevemente en qué puedes ayudar (pedidos, productos, devoluciones, cuenta). Ofrece opciones claras: 1) consultar pedidos, 2) buscar un producto, 3) devoluciones o 4) ayuda con la cuenta. Aclara que no pedirás contraseñas ni datos sensibles. Invita a que cuente qué necesita.",
   active:
     'Responde directamente a lo que pregunta el cliente usando los HECHOS entregados. Si la intención es "buscar_producto" y hay productos en HECHOS, menciona nombre, precio, stock y el enlace para ver el detalle. Si no hay productos, pide más detalles del producto. Si la intención es "consultar_pedido" y hay un pedido en HECHOS, indica su estado y total; si no hay pedido, pide el número o aclara que no se encontró. Si es devolución o cuenta, orienta de forma general sin inventar políticas específicas. Cierra preguntando si necesita algo más.',
   survey_intro:
@@ -287,14 +291,14 @@ Escribe ahora el siguiente mensaje de NendoBot dirigido al cliente.`;
 
 const fallbackTemplate = ({ customerName, stage, facts }) => {
   if (stage === "welcome") {
-    return `Hola ${customerName}, soy NendoBot, asesor de NendoShop. Puedo ayudarte con pedidos, productos, devoluciones y cuenta. Cuéntame qué necesitas.`;
+    return `Hola ${customerName}, soy NendoBot, asesor de NendoShop. Puedo ayudarte con pedidos, productos, devoluciones y cuenta. Si lo prefieres, puedes decirme 1 para pedidos, 2 para productos, 3 para devoluciones o 4 para tu cuenta.`;
   }
   if (facts?.tipo === "producto") {
     const [p] = facts.productos || [];
     if (p) {
       const commentsText = p.comentarios?.length ? ` Comentarios recientes: ${p.comentarios.join("; ")}` : "";
       const intro = facts.cheapest ? `El producto más económico que tengo registrado es "${p.nombre}".` : `Encontré "${p.nombre}".`;
-      return `${intro} Tiene un precio de S/. ${p.precio} y ${p.stock} unidades disponibles. Puedes ver el detalle aquí: ${p.enlace}.${commentsText}`;
+      return `${intro} Tiene un precio de S/. ${p.precio} y ${p.stock} unidades disponibles. Puedes ver el detalle aquí: ${p.enlace}${commentsText}`;
     }
     return `En este momento no tengo un producto que coincida con esa búsqueda en la base de datos. Si me das el nombre o la categoría, te ayudo mejor. También puedo revisar el más económico si lo prefieres.`;
   }
@@ -314,7 +318,12 @@ const fallbackTemplate = ({ customerName, stage, facts }) => {
 };
 
 const safeBlockedReply = (customerName) =>
-  `Lo siento ${customerName}, no puedo continuar con ese tipo de mensaje. Por favor reformula tu consulta sin lenguaje ofensivo, violento o sexual, y con gusto te ayudo.`;
+  `Lo siento ${customerName}, no puedo continuar con ese tipo de mensaje. Reformula tu consulta sin lenguaje ofensivo, violento o sexual, y con gusto te ayudo.`;
+
+const looksLikeEnglishReply = (reply) => {
+  const text = String(reply || "").toLowerCase();
+  return /(hello|hi|thank you|thanks|customer support|we need|the product|please|could|would|available|details|cart|survey)/i.test(text);
+};
 
 const composeReply = async ({ customerName, intent, stage, session, facts }) => {
   const apiKey = await getGroqApiKey();
@@ -329,7 +338,7 @@ const composeReply = async ({ customerName, intent, stage, session, facts }) => 
     reply = await callGroq({
       apiKey,
       input,
-      temperature: 0.6,
+      temperature: 0.2,
       maxOutputTokens: 260,
       onFallback: () => fallbackTemplate({ customerName, stage, facts })
     });
@@ -341,7 +350,7 @@ const composeReply = async ({ customerName, intent, stage, session, facts }) => 
   // Defensa en profundidad: nunca reenviar al usuario una respuesta insegura,
   // aunque sea improbable dado el system prompt.
   const outputSafety = checkTextSafety(reply);
-  if (outputSafety.block) {
+  if (outputSafety.block || looksLikeEnglishReply(reply)) {
     console.error("Respuesta generada bloqueada por seguridad de salida", { reply });
     return fallbackTemplate({ customerName, stage, facts });
   }
