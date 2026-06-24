@@ -42,25 +42,145 @@ const SUPPORT_INTRO =
 // ---------------------------------------------------------------------------
 // Filtro rápido local (defensa en profundidad, no sustituye a Groq)
 // ---------------------------------------------------------------------------
+//
+// Este filtro corre ANTES de cualquier llamada a Groq, así que debe ser
+// barato y razonablemente robusto contra evasiones típicas en español:
+//   - tildes inconsistentes ("estúpido" / "estupido")
+//   - separadores insertados entre letras ("p u t a", "p.u.t.a", "p-u-t-a")
+//   - alargamiento de letras ("puuuuuta", "mierdaaaa")
+//   - leetspeak básico ("p4ta", "s3x0", "put@")
+//
+// No sustituye a la moderación de Groq (que ve sinónimos, contexto y
+// expresiones especializadas); es solo la primera capa, rápida y local.
+
+// Sustituciones típicas de leetspeak (dígitos/símbolos -> letra que imitan).
+const LEET_SUBSTITUTIONS = {
+  "0": "o",
+  "1": "i",
+  "!": "i",
+  "3": "e",
+  "4": "a",
+  "@": "a",
+  "5": "s",
+  "$": "s",
+  "7": "t",
+  "8": "b",
+  "9": "g"
+};
+
+// Quita tildes de las vocales (á->a, é->e, í->i, ó->o, ú/ü->u) sin tocar la
+// "ñ", para no confundir, por ejemplo, "año" con "ano".
+const stripAccents = (text) =>
+  String(text || "")
+    .replace(/[áàäâ]/g, "a")
+    .replace(/[éèëê]/g, "e")
+    .replace(/[íìïî]/g, "i")
+    .replace(/[óòöô]/g, "o")
+    .replace(/[úùüû]/g, "u");
+
+const applyLeetSubstitutions = (text) =>
+  String(text || "").replace(/[01345789!@$]/g, (ch) => LEET_SUBSTITUTIONS[ch] || ch);
+
+// Colapsa letras repetidas consecutivas ("puuuuuta" -> "puta") para detectar
+// alargamientos usados para evadir el filtro. Esto también afectaría a
+// palabras con dobles letras legítimas ("terrorista", "perra", "gilipollas"
+// -> "terorista", "pera", "gilipolas"), así que la detección de alargamiento
+// solo se aplica a palabras del diccionario que NO tienen dobles letras
+// propias (ver ELONGATION_PATTERNS más abajo) — evita falsos positivos como
+// confundir "perra" colapsada con la palabra inocente "pera".
+const collapseRepeatedChars = (text) => String(text || "").replace(/([a-z0-9ñ])\1+/g, "$1");
+
+// Variantes normalizadas del texto del usuario:
+//  - "spaced": conserva espacios/puntuación (sirve para \b contra el
+//    diccionario, tolerando separadores insertados entre letras).
+//  - "spacedCollapsed": igual que "spaced" pero con letras repetidas
+//    colapsadas, para detectar alargamientos ("puuuuuta", "estuuupido").
+const buildNormalizedVariants = (text) => {
+  const lowered = String(text || "").toLowerCase();
+  const noAccents = stripAccents(lowered);
+  const deLeeted = applyLeetSubstitutions(noAccents);
+  return {
+    spaced: deLeeted,
+    spacedCollapsed: collapseRepeatedChars(deLeeted)
+  };
+};
+
+// Listas de palabras/expresiones bloqueadas por categoría. Todo en
+// minúsculas y sin tildes (la normalización ya deja el texto del usuario en
+// ese mismo formato antes de comparar).
+const BLOCKED_TERMS = {
+  sexual: [
+    "sexo", "sexual", "sexuales", "porno", "pornografia", "pornografico",
+    "nudez", "desnudo", "desnuda", "desnudos", "desnudas", "masturbar",
+    "masturbarse", "masturbacion", "orgasmo", "orgia", "orgias", "pene",
+    "vagina", "verga", "vergas", "tetas", "nalgas", "follar", "violacion",
+    "violar", "pedofilo", "pedofilia", "zoofilia", "incesto"
+  ],
+  violencia: [
+    "violencia", "matar", "matarte", "asesinar", "asesinato", "golpear",
+    "agredir", "agresion", "arma", "armas", "explosivo", "explosivos",
+    "bomba", "bombardear", "suicida", "suicidio", "suicidarse",
+    "terrorismo", "terrorista", "secuestrar", "secuestro", "torturar",
+    "tortura", "amenazar", "amenaza", "lastimarte", "herirte", "disparar",
+    "masacre", "hacerte daño"
+  ],
+  insultos: [
+    "puta", "puto", "putas", "putos", "mierda", "idiota", "estupido",
+    "estupida", "maldito", "maldita", "pendejo", "pendeja", "cabron",
+    "cabrona", "marica", "maricon", "gilipollas", "imbecil", "huevon",
+    "huevona", "conchatumadre", "ctm", "malparido", "malparida",
+    "hijueputa", "hijodeputa", "perra", "zorra", "mongolico", "retrasado",
+    "baboso", "babosa", "pajero", "culero", "joto"
+  ]
+};
+
+const ALL_BLOCKED_WORDS = Object.values(BLOCKED_TERMS).flat();
+const SINGLE_BLOCKED_WORDS = ALL_BLOCKED_WORDS.filter((word) => !word.includes(" "));
+const PHRASE_BLOCKED_WORDS = ALL_BLOCKED_WORDS.filter((word) => word.includes(" "));
+
+const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Patrón con \b en ambos extremos que tolera 0-3 separadores (espacios,
+// puntos, guiones, asteriscos) ENTRE cada letra de la palabra. Como el \b
+// solo se evalúa al inicio y al final de toda la palabra, esto sigue sin
+// disparar dentro de palabras legítimas que contienen la cadena como
+// substring (p. ej. "puta" dentro de "disputa" o "computadora": ahí no hay
+// límite de palabra justo antes de la "p"), pero sí detecta evasión por
+// separadores insertados ("p u t a", "p.u.t.a", "p-u-t-a") y, al permitir
+// cero separadores, también la escritura normal de la palabra.
+const buildLooseWordPattern = (word) => {
+  const body = word.split("").map(escapeRegExp).join("[\\s.,\\-_*]{0,3}");
+  return new RegExp(`\\b${body}\\b`, "i");
+};
+
+const LOOSE_SINGLE_PATTERNS = SINGLE_BLOCKED_WORDS.map(buildLooseWordPattern);
+
+// Frases de varias palabras (ej. "hacerte daño"): basta con tolerar espacios
+// múltiples entre las palabras, no hace falta la lógica letra por letra.
+const PHRASE_PATTERNS = PHRASE_BLOCKED_WORDS.map(
+  (phrase) => new RegExp(`\\b${escapeRegExp(phrase).replace(/ /g, "\\s+")}\\b`, "i")
+);
+
+// Detección de alargamiento ("puuuuuta", "estuuupido"): solo para palabras
+// sin dobles letras propias, para no chocar con palabras inocentes que sí
+// las tienen al colapsarlas (ver nota en collapseRepeatedChars).
+const ELONGATION_WORDS = SINGLE_BLOCKED_WORDS.filter((word) => collapseRepeatedChars(word) === word);
+const ELONGATION_PATTERNS = ELONGATION_WORDS.map((word) => new RegExp(`\\b${escapeRegExp(word)}\\b`, "i"));
 
 const checkTextSafety = (text) => {
-  const value = String(text || "").trim().toLowerCase();
-  if (!value) {
+  const raw = String(text || "").trim();
+  if (!raw) {
     return { allowed: false, block: true, reason: "El mensaje está vacío." };
   }
 
-  const normalized = value.replace(/[^a-z0-9]/g, "");
-  const blockedPatterns = [
-    /\b(sex|sexual|porno|pornografia|nudez|desnudo|masturb|orgias?)\b/i,
-    /\b(violencia|matar|asesinar|golpear|agredir|arma|explosivo|suicida|suicidio)\b/i,
-    /\b(puta|puto|mierda|idiota|estúpido|maldito)\b/i,
-    /\b(terror|bomb|matarte|hacerte daño)\b/i,
-    /\b(pu?ta)\b/i,
-    /\b(p\s*u\s*t\s*a)\b/i,
-    /\b(p\s*u\s*t\s*o)\b/i
-  ];
+  const { spaced, spacedCollapsed } = buildNormalizedVariants(raw);
 
-  const blocked = blockedPatterns.some((pattern) => pattern.test(value)) || /(puta|puto|mierda|idiota|estupido|maldito)/i.test(normalized);
+  const blockedLoose =
+    LOOSE_SINGLE_PATTERNS.some((pattern) => pattern.test(spaced)) ||
+    PHRASE_PATTERNS.some((pattern) => pattern.test(spaced));
+  const blockedElongated = ELONGATION_PATTERNS.some((pattern) => pattern.test(spacedCollapsed));
+  const blocked = blockedLoose || blockedElongated;
+
   return {
     allowed: !blocked,
     block: blocked,
