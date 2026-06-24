@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 
 const User = require("../models/User");
+const { validateProfilePayload } = require("../utils/validation");
 
 const verifyToken =
     require("../middlewares/verifyToken");
@@ -47,6 +48,13 @@ router.put(
     async (req, res) => {
 
         try {
+            const { isValid, errors } = validateProfilePayload(req.body);
+
+            if (!isValid) {
+                return res.status(400).json({
+                    message: errors.join(". ")
+                });
+            }
 
             const user =
                 await User.findById(req.user.id);

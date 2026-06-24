@@ -11,11 +11,13 @@ const resendClient = new Resend(process.env.RESEND_API_KEY);
 
 const User = require("../models/User");
 const { recordLog } = require("../utils/logger");
+const { validateRegistrationPayload } = require("../utils/validation");
 
 const OTP_EXPIRE_MS = 5 * 60 * 1000;
 const RESEND_WAIT_MS = 30 * 1000;
 const BLOCK_DURATION_MS = 2 * 60 * 1000;
 const MAX_VERIFY_ATTEMPTS = 3;
+const pendingRegistrations = new Map();
 
 const generateCode = () => String(Math.floor(100000 + Math.random() * 900000));
 const generateTempToken = () => crypto.randomBytes(24).toString("hex");
@@ -215,10 +217,90 @@ router.post("/resend-2fa", async (req, res) => {
 
 router.post("/verify-2fa", async (req, res) => {
   try {
-    const { email, tempToken, code } = req.body;
+    const { email, tempToken, code, pendingRegistration, forgotPassword, newPassword } = req.body;
 
     if (!email || !tempToken || !code) {
       return res.status(400).json({ message: "Email, token y código son requeridos" });
+    }
+
+    const pendingEntry = pendingRegistrations.get(tempToken) || pendingRegistration;
+
+    if (forgotPassword) {
+      const user = await User.findOne({ email });
+      if (!user) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      if (user.twoFactorTempToken !== tempToken) {
+        return res.status(401).json({ message: "Token de verificación inválido" });
+      }
+
+      const now = new Date();
+      if (!user.twoFactorCode || !user.twoFactorExpires || user.twoFactorExpires < now || user.twoFactorCode !== code) {
+        return res.status(401).json({ message: "Código incorrecto o expirado" });
+      }
+
+      user.password = await bcrypt.hash(newPassword, 10);
+      user.twoFactorCode = null;
+      user.twoFactorExpires = null;
+      user.twoFactorTempToken = null;
+      user.twoFactorAttempts = 0;
+      user.twoFactorBlockedUntil = null;
+      user.twoFactorLastSentAt = null;
+      user.twoFactorMethod = null;
+      await user.save();
+
+      await recordLog({ req, usuario: user.email, descripcion: "Contraseña actualizada tras verificación en dos pasos", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
+
+      return res.json({ message: "Contraseña actualizada correctamente" });
+    }
+
+    if (pendingEntry) {
+      const now = new Date();
+      if (!pendingEntry.code || !pendingEntry.expiresAt || pendingEntry.expiresAt < now || pendingEntry.code !== code) {
+        return res.status(401).json({ message: "Código incorrecto o expirado" });
+      }
+
+      const existingUser = await User.findOne({ email });
+      if (existingUser) {
+        return res.status(400).json({ message: "El email ya existe" });
+      }
+
+      const user = new User({
+        name: pendingEntry.name,
+        lastname: pendingEntry.lastname,
+        email: pendingEntry.email,
+        password: pendingEntry.password,
+        phone: pendingEntry.phone,
+        address: pendingEntry.address,
+        city: pendingEntry.city,
+        birthdate: pendingEntry.birthdate,
+        sex: pendingEntry.sex,
+        role: "user"
+      });
+
+      await user.save();
+      pendingRegistrations.delete(tempToken);
+      await recordLog({ req, usuario: user.email, descripcion: "Registro completado tras verificación en dos pasos", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
+
+      const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: "7d" });
+      res.cookie("token", token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
+
+      return res.json({
+        message: "Verificación correcta",
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          profileImg: user.profileImg
+        }
+      });
     }
 
     const user = await User.findOne({ email });
@@ -301,9 +383,54 @@ router.post("/verify-2fa", async (req, res) => {
   }
 });
 
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const { email, newPassword } = req.body;
+
+    if (!email || !newPassword) {
+      return res.status(400).json({ message: "Correo y nueva contraseña requeridos" });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: "Usuario no encontrado" });
+    }
+
+    const code = generateCode();
+    const tempToken = generateTempToken();
+    const now = new Date();
+
+    user.twoFactorCode = code;
+    user.twoFactorMethod = "email";
+    user.twoFactorTempToken = tempToken;
+    user.twoFactorExpires = new Date(now.getTime() + OTP_EXPIRE_MS);
+    user.twoFactorLastSentAt = now;
+    user.twoFactorAttempts = 0;
+    user.twoFactorBlockedUntil = null;
+    await user.save();
+
+    await sendTwoFactorCode(user, "email", code);
+
+    return res.json({
+      message: "Verifica tu correo para confirmar el cambio de contraseña",
+      tempToken,
+      twoFactorRequired: true
+    });
+  } catch (error) {
+    res.status(500).json(error);
+  }
+});
+
 router.post("/register", async (req, res) => {
 
     try {
+        const { isValid, errors } = validateRegistrationPayload(req.body);
+
+        if (!isValid) {
+            return res.status(400).json({
+                message: errors.join(". ")
+            });
+        }
 
         const exists = await User.findOne({
             email: req.body.email
@@ -315,30 +442,36 @@ router.post("/register", async (req, res) => {
             });
         }
 
+        const code = generateCode();
+        const tempToken = generateTempToken();
+        const now = new Date();
+        const hashedPassword = await bcrypt.hash(req.body.password, 10);
 
-       const hashedPassword =
-            await bcrypt.hash(req.body.password, 10);
-
-        const user = new User({
-
-            ...req.body,
-
-            password: hashedPassword
-
+        pendingRegistrations.set(tempToken, {
+            email: req.body.email,
+            password: hashedPassword,
+            name: req.body.name,
+            lastname: req.body.lastname,
+            phone: req.body.phone,
+            address: req.body.address,
+            city: req.body.city,
+            birthdate: req.body.birthdate,
+            sex: req.body.sex,
+            code,
+            expiresAt: new Date(now.getTime() + OTP_EXPIRE_MS)
         });
 
-        await user.save();
+        await sendTwoFactorCode({ email: req.body.email, name: req.body.name }, "email", code);
+        await recordLog({ req, usuario: req.body.email, descripcion: "Registro iniciado con verificación en dos pasos", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
 
-await recordLog({ req, usuario: req.body.email, descripcion: "Nuevo usuario registrado", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
-
-    res.json({
-            message: "Usuario registrado"
+        return res.json({
+            message: "Verifica tu correo para completar el registro",
+            tempToken,
+            twoFactorRequired: true
         });
 
     } catch (error) {
-
         res.status(500).json(error);
-
     }
 
 });
