@@ -57,7 +57,41 @@ wss.on("connection", (socket) => {
 
   socket.on("message", async (rawMessage) => {
     try {
-      const message = JSON.parse(rawMessage.toString());
+      let message = rawMessage;
+      if (Buffer.isBuffer(rawMessage)) {
+        const text = rawMessage.toString("utf8").trim();
+        if (!text) {
+          return;
+        }
+        try {
+          message = JSON.parse(text);
+        } catch {
+          message = { type: "message", text, roomKey: socket.roomKey };
+        }
+      } else if (rawMessage instanceof ArrayBuffer) {
+        const text = Buffer.from(rawMessage).toString("utf8").trim();
+        message = text ? JSON.parse(text) : null;
+      } else if (ArrayBuffer.isView(rawMessage)) {
+        const text = Buffer.from(rawMessage.buffer, rawMessage.byteOffset, rawMessage.byteLength).toString("utf8").trim();
+        message = text ? JSON.parse(text) : null;
+      } else if (typeof rawMessage === "string") {
+        const text = rawMessage.trim();
+        if (!text) {
+          return;
+        }
+        try {
+          message = JSON.parse(text);
+        } catch {
+          message = { type: "message", text, roomKey: socket.roomKey };
+        }
+      } else if (typeof rawMessage === "object") {
+        message = rawMessage;
+      }
+
+      if (!message || typeof message !== "object") {
+        return;
+      }
+
       await wsBroadcast.handleClientMessage(socket, message);
     } catch (error) {
       console.error("WS message parse error:", error.message || error);

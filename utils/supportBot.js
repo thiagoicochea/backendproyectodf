@@ -29,8 +29,8 @@ const Payment = require("../models/Payment");
 const Product = require("../models/Product");
 const { getGroqApiKey, callGroq, parseGroqJson } = require("../utils/groqClient");
 
-const FRONTEND_BASE_URL = process.env.FRONTEND_URL || "https://tu-frontend.com";
-const PRODUCT_DETAIL_PATH = "/product"; // <-- ajusta si tu ruta es distinta
+const FRONTEND_BASE_URL = process.env.FRONTEND_URL || process.env.REACT_APP_FRONTEND_URL || (process.env.NODE_ENV === "development" ? "http://localhost:3000" : "https://nendoshop.onrender.com");
+const PRODUCT_DETAIL_PATH = "/product";
 const buildProductLink = (id) => `${FRONTEND_BASE_URL}${PRODUCT_DETAIL_PATH}/${id}`;
 
 const SUPPORT_INTRO =
@@ -135,6 +135,7 @@ const toProductFact = (product) => ({
   precio: product.price || 0,
   stock: product.stock || 0,
   descuento: product.discount || 0,
+  comentarios: (product.comments || []).slice(-3).map((comment) => comment.text).filter(Boolean),
   enlace: buildProductLink(product._id)
 });
 
@@ -279,7 +280,8 @@ const fallbackTemplate = ({ customerName, stage, facts }) => {
   if (facts?.tipo === "producto") {
     const [p] = facts.productos || [];
     if (p) {
-      return `Encontré "${p.nombre}" a S/. ${p.precio}, con ${p.stock} unidades disponibles. Puedes ver el detalle aquí: ${p.enlace}`;
+      const commentsText = p.comentarios?.length ? ` Comentarios recientes: ${p.comentarios.join("; ")}` : "";
+      return `Encontré "${p.nombre}" a S/. ${p.precio}, con ${p.stock} unidades disponibles. Puedes ver el detalle aquí: ${p.enlace}.${commentsText}`;
     }
     return `No encontré un producto con esos datos, ${customerName}. ¿Puedes darme el nombre exacto?`;
   }
@@ -449,10 +451,13 @@ const getSupportBotReply = async (input, session) => {
   return reply;
 };
 
+const buildSupportBotReply = getSupportBotReply;
+
 module.exports = {
   SUPPORT_INTRO,
   createSupportSession,
   getSupportBotReply,
+  buildSupportBotReply,
   checkTextSafety,
   normalizeCustomerName,
   extractOrderNumber,

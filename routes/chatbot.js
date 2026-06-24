@@ -9,7 +9,7 @@
 const express = require("express");
 const router = express.Router();
 
-const { createSupportSession, getSupportBotReply, normalizeCustomerName } = require("../services/supportBot");
+const { createSupportSession, getSupportBotReply, normalizeCustomerName } = require("../utils/supportBot");
 
 const sessions = new Map();
 

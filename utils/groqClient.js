@@ -10,7 +10,7 @@ const Config = require("../models/Config");
 
 const GROQ_HOST = "api.groq.com";
 const GROQ_PATH = "/openai/v1/responses";
-const DEFAULT_MODEL = "openai/gpt-oss-20b";
+const DEFAULT_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
 
 const extractGroqKey = (value) => {
   if (!value) return null;
@@ -34,11 +34,20 @@ const extractGroqKey = (value) => {
 // que contiene { key: "apiComentarios", value: "<key o url con la key>" }.
 // Tanto la moderación de comentarios como el bot reutilizan esa misma key.
 const getGroqApiKey = async () => {
-  const config = await Config.findOne();
-  const apiConfig = config?.apiComentarios?.find(
-    (item) => item.key === "apiComentarios"
-  );
-  return extractGroqKey(apiConfig?.value);
+  if (process.env.GROQ_API_KEY) {
+    return extractGroqKey(process.env.GROQ_API_KEY);
+  }
+
+  try {
+    const config = await Config.findOne().lean();
+    const apiConfig = config?.apiComentarios?.find(
+      (item) => item.key === "apiComentarios"
+    );
+    return extractGroqKey(apiConfig?.value);
+  } catch (err) {
+    console.warn("No se pudo leer la configuración de Groq desde Mongo:", err.message);
+    return null;
+  }
 };
 
 const extractOutputText = (value) => {
