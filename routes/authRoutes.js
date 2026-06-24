@@ -24,6 +24,7 @@ const pendingProfileUpdates = new Map();
 
 const generateCode = () => String(Math.floor(100000 + Math.random() * 900000));
 const generateTempToken = () => crypto.randomBytes(24).toString("hex");
+const normalizeEmail = (value) => (value || "").trim().toLowerCase();
 
 const generateEmailHtml = (name, code) => {
   const brand = "#9333EA";
@@ -114,10 +115,11 @@ const isBlocked = (user) => {
 
 router.post("/login", async (req, res) => {
   try {
-    const user = await User.findOne({ email: req.body.email });
+    const normalizedEmail = normalizeEmail(req.body.email);
+    const user = await User.findOne({ email: normalizedEmail });
 
     if (!user) {
-      await recordLog({ req, usuario: req.body.email, descripcion: "Intento de login con correo no registrado", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
+      await recordLog({ req, usuario: normalizedEmail, descripcion: "Intento de login con correo no registrado", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
       return res.status(401).json({ message: "Usuario no encontrado" });
     }
 
@@ -178,13 +180,82 @@ router.post("/login", async (req, res) => {
 
 router.post("/resend-2fa", async (req, res) => {
   try {
-    const { email, tempToken, method } = req.body;
+    const {
+      email,
+      tempToken,
+      method,
+      pendingRegistration,
+      pendingPasswordChange,
+      pendingProfileUpdate,
+      forgotPassword,
+      newPassword,
+    } = req.body;
+    const normalizedEmail = normalizeEmail(email);
 
-    if (!email || !tempToken) {
+    if (!normalizedEmail || !tempToken) {
       return res.status(400).json({ message: "Email y token temporario son requeridos" });
     }
 
-    const user = await User.findOne({ email });
+    const pendingEntry = pendingRegistrations.get(tempToken) || pendingRegistration;
+    const pendingChangeEntry = pendingPasswordChanges.get(tempToken) || pendingPasswordChange;
+    const pendingProfileEntry = pendingProfileUpdates.get(tempToken) || pendingProfileUpdate;
+
+    if (pendingEntry) {
+      const now = new Date();
+      const newCode = generateCode();
+      const sendMethod = method || "email";
+      const entry = {
+        ...(pendingEntry || {}),
+        email: normalizeEmail(pendingEntry?.email || normalizedEmail),
+        code: newCode,
+        expiresAt: new Date(now.getTime() + OTP_EXPIRE_MS)
+      };
+
+      pendingRegistrations.set(tempToken, entry);
+      await sendTwoFactorCode({ email: entry.email, name: entry.name }, sendMethod, newCode);
+
+      return res.json({
+        message: "Código reenviado",
+        method: sendMethod,
+        waitSeconds: 30
+      });
+    }
+
+    if (pendingChangeEntry || pendingProfileEntry || forgotPassword) {
+      const targetEmail = normalizeEmail((pendingChangeEntry && pendingChangeEntry.email) || (pendingProfileEntry && pendingProfileEntry.email) || normalizedEmail);
+      const user = await User.findOne({ email: targetEmail });
+
+      if (!user) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      const now = new Date();
+      if (user.twoFactorLastSentAt && now - user.twoFactorLastSentAt < RESEND_WAIT_MS) {
+        const waitSeconds = Math.ceil((RESEND_WAIT_MS - (now - user.twoFactorLastSentAt)) / 1000);
+        return res.status(429).json({
+          message: `Espera ${waitSeconds} segundos antes de reenviar el código.`
+        });
+      }
+
+      const newCode = generateCode();
+      const sendMethod = method || "email";
+      await sendTwoFactorCode(user, sendMethod, newCode);
+
+      user.twoFactorCode = newCode;
+      user.twoFactorMethod = sendMethod;
+      user.twoFactorExpires = new Date(now.getTime() + OTP_EXPIRE_MS);
+      user.twoFactorLastSentAt = now;
+      user.twoFactorAttempts = 0;
+      await user.save();
+
+      return res.json({
+        message: "Código reenviado",
+        method: sendMethod,
+        waitSeconds: 30
+      });
+    }
+
+    const user = await User.findOne({ email: normalizedEmail });
 
     if (!user) {
       return res.status(404).json({ message: "Usuario no encontrado" });
@@ -234,8 +305,9 @@ router.post("/resend-2fa", async (req, res) => {
 router.post("/verify-2fa", async (req, res) => {
   try {
     const { email, tempToken, code, pendingRegistration, forgotPassword, newPassword, pendingPasswordChange, pendingProfileUpdate } = req.body;
+    const normalizedEmail = normalizeEmail(email);
 
-    if (!email || !tempToken || !code) {
+    if (!normalizedEmail || !tempToken || !code) {
       return res.status(400).json({ message: "Email, token y código son requeridos" });
     }
 
@@ -249,7 +321,7 @@ router.post("/verify-2fa", async (req, res) => {
         return res.status(401).json({ message: "Código incorrecto o expirado" });
       }
 
-      const existingUser = await User.findOne({ email });
+      const existingUser = await User.findOne({ email: normalizedEmail });
       if (existingUser) {
         return res.status(400).json({ message: "El email ya existe" });
       }
@@ -292,7 +364,7 @@ router.post("/verify-2fa", async (req, res) => {
     }
 
     if (pendingChangeEntry) {
-      const user = await User.findOne({ email: pendingChangeEntry.email || email });
+      const user = await User.findOne({ email: normalizeEmail(pendingChangeEntry.email || normalizedEmail) });
       if (!user) {
         return res.status(404).json({ message: "Usuario no encontrado" });
       }
@@ -323,7 +395,7 @@ router.post("/verify-2fa", async (req, res) => {
     }
 
     if (pendingProfileEntry) {
-      const user = await User.findOne({ email: pendingProfileEntry.email || email });
+      const user = await User.findOne({ email: normalizeEmail(pendingProfileEntry.email || normalizedEmail) });
       if (!user) {
         return res.status(404).json({ message: "Usuario no encontrado" });
       }
@@ -363,7 +435,7 @@ router.post("/verify-2fa", async (req, res) => {
     }
 
     if (forgotPassword) {
-      const user = await User.findOne({ email });
+      const user = await User.findOne({ email: normalizedEmail });
       if (!user) {
         return res.status(404).json({ message: "Usuario no encontrado" });
       }
@@ -410,7 +482,7 @@ router.post("/verify-2fa", async (req, res) => {
       });
     }
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: normalizedEmail });
 
     if (!user) {
       return res.status(404).json({ message: "Usuario no encontrado" });
@@ -587,8 +659,9 @@ router.post("/change-password-request", verifyToken, async (req, res) => {
 router.post("/forgot-password", async (req, res) => {
   try {
     const { email, newPassword } = req.body;
+    const normalizedEmail = normalizeEmail(email);
 
-    if (!email || !newPassword) {
+    if (!normalizedEmail || !newPassword) {
       return res.status(400).json({ message: "Correo y nueva contraseña requeridos" });
     }
 
@@ -602,7 +675,7 @@ router.post("/forgot-password", async (req, res) => {
     const now = new Date();
 
     pendingPasswordChanges.set(tempToken, {
-      email: user.email,
+      email: normalizedEmail,
       newPassword,
       kind: "forgot"
     });
@@ -631,6 +704,7 @@ router.post("/forgot-password", async (req, res) => {
 router.post("/register", async (req, res) => {
 
     try {
+        const normalizedEmail = normalizeEmail(req.body.email);
         const { isValid, errors } = validateRegistrationPayload(req.body);
 
         if (!isValid) {
@@ -640,7 +714,7 @@ router.post("/register", async (req, res) => {
         }
 
         const exists = await User.findOne({
-            email: req.body.email
+            email: normalizedEmail
         });
 
         if (exists) {
@@ -655,7 +729,7 @@ router.post("/register", async (req, res) => {
         const hashedPassword = await bcrypt.hash(req.body.password, 10);
 
         pendingRegistrations.set(tempToken, {
-            email: req.body.email,
+            email: normalizedEmail,
             password: hashedPassword,
             name: req.body.name,
             lastname: req.body.lastname,
@@ -668,8 +742,8 @@ router.post("/register", async (req, res) => {
             expiresAt: new Date(now.getTime() + OTP_EXPIRE_MS)
         });
 
-        await sendTwoFactorCode({ email: req.body.email, name: req.body.name }, "email", code);
-        await recordLog({ req, usuario: req.body.email, descripcion: "Registro iniciado con verificación en dos pasos", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
+        await sendTwoFactorCode({ email: normalizedEmail, name: req.body.name }, "email", code);
+        await recordLog({ req, usuario: normalizedEmail, descripcion: "Registro iniciado con verificación en dos pasos", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
 
         return res.json({
             message: "Verifica tu correo para completar el registro",
