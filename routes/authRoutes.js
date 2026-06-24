@@ -386,10 +386,28 @@ router.post("/verify-2fa", async (req, res) => {
       user.twoFactorLastSentAt = null;
       user.twoFactorMethod = null;
       await user.save();
+      pendingPasswordChanges.delete(tempToken);
 
       await recordLog({ req, usuario: user.email, descripcion: "Contraseña actualizada tras verificación en dos pasos", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
 
-      return res.json({ message: "Contraseña actualizada correctamente" });
+      const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: "7d" });
+      res.cookie("token", token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
+
+      return res.json({
+        message: "Contraseña actualizada correctamente",
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          profileImg: user.profileImg
+        }
+      });
     }
 
     const user = await User.findOne({ email });
