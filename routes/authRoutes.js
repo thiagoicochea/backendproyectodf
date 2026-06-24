@@ -10,6 +10,7 @@ const { Resend } = require("resend");
 const resendClient = new Resend(process.env.RESEND_API_KEY);
 
 const User = require("../models/User");
+const { recordLog } = require("../utils/logger");
 
 const OTP_EXPIRE_MS = 5 * 60 * 1000;
 const RESEND_WAIT_MS = 30 * 1000;
@@ -111,12 +112,14 @@ router.post("/login", async (req, res) => {
     const user = await User.findOne({ email: req.body.email });
 
     if (!user) {
+      await recordLog({ req, usuario: req.body.email, descripcion: "Intento de login con correo no registrado", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
       return res.status(401).json({ message: "Usuario no encontrado" });
     }
 
     const validPassword = await bcrypt.compare(req.body.password, user.password);
 
     if (!validPassword) {
+      await recordLog({ req, usuario: user.email, descripcion: "Intento de login con contraseña incorrecta", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
       return res.status(401).json({ message: "Password incorrecta" });
     }
 
@@ -141,6 +144,8 @@ router.post("/login", async (req, res) => {
     user.twoFactorBlockedUntil = null;
 
     await user.save();
+
+    await recordLog({ req, usuario: user.email, descripcion: "Inicio de sesión solicitado con verificación en dos pasos", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
 
     return res.json({
       twoFactorRequired: true,
@@ -227,8 +232,16 @@ router.post("/verify-2fa", async (req, res) => {
     }
 
     if (isBlocked(user)) {
+      await recordLog({ req, usuario: user.email, descripcion: "Verificación 2FA bloqueada por exceso de intentos", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
       return res.status(403).json({
         message: "La cuenta está bloqueada temporalmente por demasiados intentos fallidos. Intenta de nuevo en unos minutos."
+      });
+    }
+
+    if (user.chatBlockedUntil && new Date(user.chatBlockedUntil) > new Date()) {
+      await recordLog({ req, usuario: user.email, descripcion: "Intento de verificación bloqueado por estado de seguridad", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
+      return res.status(403).json({
+        message: "Tu cuenta está bloqueada por reportes acumulados. Contacta al administrador."
       });
     }
 
@@ -316,7 +329,9 @@ router.post("/register", async (req, res) => {
 
         await user.save();
 
-        res.json({
+await recordLog({ req, usuario: req.body.email, descripcion: "Nuevo usuario registrado", tipo: "AUTH", metodo: req.method, ruta: req.originalUrl });
+
+    res.json({
             message: "Usuario registrado"
         });
 

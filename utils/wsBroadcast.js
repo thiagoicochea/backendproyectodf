@@ -1,5 +1,7 @@
 const ChatMessage = require("../models/ChatMessage");
+const User = require("../models/User");
 const { buildSupportBotReply, createSupportSession, checkTextSafety } = require("./supportBot");
+const { recordLog } = require("../utils/logger");
 
 let wss = null;
 const roomUsers = new Map();
@@ -91,6 +93,37 @@ const handleClientMessage = async (socket, message) => {
 
   if (type === "typing" && socket.roomKey) {
     broadcastToRoom(socket.roomKey, { type: "typing", username: socket.username || "Usuario" }, socket);
+    return;
+  }
+
+  if (type === "report-user") {
+    const targetUser = await User.findById(message.targetUserId);
+    if (!targetUser) {
+      socket.send(JSON.stringify({ type: "error", message: "Usuario no encontrado" }));
+      return;
+    }
+
+    targetUser.chatReportCount = (targetUser.chatReportCount || 0) + 1;
+    if (targetUser.chatReportCount >= 10) {
+      targetUser.chatBlockedUntil = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30);
+      targetUser.chatBlockReason = message.reason || "Reporte acumulado";
+    }
+    await targetUser.save();
+
+    await recordLog({
+      usuario: socket.username || "Anónimo",
+      descripcion: `Reportó al usuario ${targetUser.email || targetUser.name || message.targetUsername} por: ${message.reason || "sin motivo"}`,
+      tipo: "SISTEMA",
+      metodo: "WS",
+      ruta: "/chat/report"
+    });
+
+    socket.send(JSON.stringify({
+      type: "report-received",
+      message: targetUser.chatReportCount >= 10
+        ? "El usuario ha sido bloqueado por superar el límite de reportes."
+        : `Reporte recibido. Total actual: ${targetUser.chatReportCount}`
+    }));
     return;
   }
 
