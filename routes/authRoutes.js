@@ -28,6 +28,17 @@ const pendingProfileUpdates = new Map();
 const generateCode = () => String(Math.floor(100000 + Math.random() * 900000));
 const generateTempToken = () => crypto.randomBytes(24).toString("hex");
 const normalizeEmail = (value) => (value || "").trim().toLowerCase();
+const getResendFromAddress = () => {
+  const raw = (process.env.RESEND_FROM_EMAIL || "").trim();
+  if (!raw || !raw.includes("@")) return null;
+
+  const [localPart, domain] = raw.split("@");
+  if (!localPart || !domain || domain.toLowerCase().includes("resend.dev")) {
+    return null;
+  }
+
+  return raw;
+};
 
 const generateEmailHtml = (name, code) => {
   const brand = "#9333EA";
@@ -56,21 +67,31 @@ const sendTwoFactorCode = async (user, method, code) => {
 
   if (sendMethod === "email") {
     const html = generateEmailHtml(user.name || user.email, code);
-    const from = process.env.RESEND_FROM_EMAIL || 'Nendoshop <onboarding@resend.dev>';
+    const from = getResendFromAddress();
     const to = user.email;
-    const replyTo = from;
+    const replyTo = from || "noreply@localhost";
     const text = `Hola ${user.name || user.email},\n\nTu código de verificación es: ${code}.\n\nSi no solicitaste este código, ignora este mensaje.`;
 
     if (!resendClient) {
       console.error('[2FA] RESEND_API_KEY no configurada; no se pudo enviar el correo');
-      return { sentBy: 'email', error: true, reason: 'missing_api_key' };
+      return { sentBy: 'email', error: true, reason: 'missing_api_key', message: 'No se pudo enviar el correo porque la clave de Resend no está configurada.' };
+    }
+
+    if (!from) {
+      console.error('[2FA] No hay remitente verificado en Resend para enviar correos');
+      return {
+        sentBy: 'email',
+        error: true,
+        reason: 'unverified_sender',
+        message: 'No se pudo enviar el correo porque el remitente no está verificado en Resend. Configura RESEND_FROM_EMAIL con un dominio verificado, por ejemplo: no-reply@tu-dominio.com.'
+      };
     }
 
     try {
       const { data } = await resendClient.emails.send({
         from,
         to,
-        replyTo,
+        replyTo, 
         subject: 'Código de verificación - Nendoshop',
         text,
         html,
@@ -79,9 +100,17 @@ const sendTwoFactorCode = async (user, method, code) => {
       console.log('[2FA] Email enviado:', data);
       return { sentBy: 'email', data };
     } catch (err) {
-      console.error('[2FA] Error al enviar email con Resend', err);
+      const errorMessage = err?.message || "Error desconocido al enviar el correo";
+      console.error('[2FA] Error al enviar email con Resend', errorMessage);
       console.log(`[2FA] fallback código: ${code}`);
-      return { sentBy: 'email', error: true };
+      return {
+        sentBy: 'email',
+        error: true,
+        reason: 'resend_error',
+        message: errorMessage.includes('domain') || errorMessage.includes('testing')
+          ? 'Resend rechazó el envío por restricciones del remitente o del dominio. Verifica el remitente en Resend.'
+          : 'No se pudo enviar el correo de verificación.'
+      };
     }
   }
 
@@ -161,7 +190,10 @@ router.post("/login", async (req, res) => {
     const tempToken = generateTempToken();
     const now = new Date();
 
-    await sendTwoFactorCode(user, "email", code);
+    const emailResult = await sendTwoFactorCode(user, "email", code);
+    if (emailResult?.error) {
+      return res.status(502).json({ message: emailResult.message || "No se pudo enviar el código por correo." });
+    }
 
     user.twoFactorCode = code;
     user.twoFactorMethod = "email";
@@ -220,7 +252,10 @@ router.post("/resend-2fa", async (req, res) => {
       };
 
       pendingRegistrations.set(tempToken, entry);
-      await sendTwoFactorCode({ email: entry.email, name: entry.name }, sendMethod, newCode);
+      const emailResult = await sendTwoFactorCode({ email: entry.email, name: entry.name }, sendMethod, newCode);
+      if (emailResult?.error) {
+        return res.status(502).json({ message: emailResult.message || "No se pudo reenviar el código por correo." });
+      }
 
       return res.json({
         message: "Código reenviado",
@@ -247,7 +282,10 @@ router.post("/resend-2fa", async (req, res) => {
 
       const newCode = generateCode();
       const sendMethod = method || "email";
-      await sendTwoFactorCode(user, sendMethod, newCode);
+      const emailResult = await sendTwoFactorCode(user, sendMethod, newCode);
+      if (emailResult?.error) {
+        return res.status(502).json({ message: emailResult.message || "No se pudo reenviar el código por correo." });
+      }
 
       user.twoFactorCode = newCode;
       user.twoFactorMethod = sendMethod;
@@ -290,7 +328,10 @@ router.post("/resend-2fa", async (req, res) => {
     const newCode = generateCode();
     const sendMethod = method || "email";
 
-    await sendTwoFactorCode(user, sendMethod, newCode);
+    const emailResult = await sendTwoFactorCode(user, sendMethod, newCode);
+    if (emailResult?.error) {
+      return res.status(502).json({ message: emailResult.message || "No se pudo reenviar el código por correo." });
+    }
 
     user.twoFactorCode = newCode;
     user.twoFactorMethod = sendMethod;
@@ -687,6 +728,12 @@ router.post("/forgot-password", async (req, res) => {
       newPassword,
       kind: "forgot"
     });
+
+    const emailResult = await sendTwoFactorCode(user, "email", code);
+    if (emailResult?.error) {
+      pendingPasswordChanges.delete(tempToken);
+      return res.status(502).json({ message: emailResult.message || "No se pudo enviar el código por correo." });
+    }
 
     user.twoFactorCode = code;
     user.twoFactorMethod = "email";
