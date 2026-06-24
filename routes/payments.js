@@ -22,18 +22,32 @@ router.post("/", verifyToken, async (req, res) => {
         if (discountProducts.length) {
             const discountedCandidates = [];
             for (const item of discountProducts) {
-                const productDoc = await Product.findOne({ name: item.name }).catch(() => null);
-                const hasDiscount = Boolean(productDoc?.discount && Number(productDoc.discount) > 0);
-                if (!hasDiscount) continue;
+                const itemName = String(item?.name || "").trim();
+                let productDoc = null;
 
-                const basePrice = Number(productDoc?.price || item.price || 0);
-                const discountRate = Number(productDoc.discount || 0);
-                const discountAmount = discountRate > 1 ? discountRate : basePrice * discountRate;
-                const discountPrice = Math.max(0, basePrice - discountAmount);
+                if (itemName) {
+                    const escapedName = itemName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                    productDoc = await Product.findOne({
+                        $or: [
+                            { name: itemName },
+                            { name: { $regex: new RegExp(`^${escapedName}$`, "i") } },
+                            { name: { $regex: new RegExp(escapedName, "i") } }
+                        ]
+                    }).catch(() => null);
+                }
+
+                const discountValue = Number(productDoc?.discount ?? item?.discount ?? 0);
+                if (!discountValue || discountValue <= 0) continue;
+
+                const basePrice = Number(productDoc?.price ?? item?.price ?? 0);
+                const discountPrice = discountValue > 1
+                    ? Math.max(0, basePrice - discountValue)
+                    : Math.max(0, basePrice * (1 - discountValue));
+
                 discountedCandidates.push({
-                    name: item.name,
+                    name: itemName || productDoc?.name || "Producto con descuento",
                     price: discountPrice,
-                    productId: productDoc?._id?.toString?.() || null,
+                    productId: productDoc?._id?.toString?.() || item?.productId || null,
                     productDoc
                 });
             }

@@ -27,7 +27,8 @@ const broadcastRoomUsers = (roomKey) => {
   const users = getRoomMembers(roomKey).map((user) => ({
     id: user.id,
     username: user.username,
-    profileImg: user.profileImg || ""
+    profileImg: user.profileImg || "",
+    online: true
   }));
   broadcastToRoom(roomKey, { type: "room-users", users });
 };
