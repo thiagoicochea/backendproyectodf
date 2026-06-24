@@ -49,14 +49,18 @@ const checkTextSafety = (text) => {
     return { allowed: false, block: true, reason: "El mensaje está vacío." };
   }
 
+  const normalized = value.replace(/[^a-z0-9]/g, "");
   const blockedPatterns = [
     /\b(sex|sexual|porno|pornografia|nudez|desnudo|masturb|orgias?)\b/i,
     /\b(violencia|matar|asesinar|golpear|agredir|arma|explosivo|suicida|suicidio)\b/i,
     /\b(puta|puto|mierda|idiota|estúpido|maldito)\b/i,
-    /\b(terror|bomb|matarte|hacerte daño)\b/i
+    /\b(terror|bomb|matarte|hacerte daño)\b/i,
+    /\b(pu?ta)\b/i,
+    /\b(p\s*u\s*t\s*a)\b/i,
+    /\b(p\s*u\s*t\s*o)\b/i
   ];
 
-  const blocked = blockedPatterns.some((pattern) => pattern.test(value));
+  const blocked = blockedPatterns.some((pattern) => pattern.test(value)) || /(puta|puto|mierda|idiota|estupido|maldito)/i.test(normalized);
   return {
     allowed: !blocked,
     block: blocked,
@@ -320,7 +324,7 @@ Escribe ahora el siguiente mensaje de NendoBot dirigido al cliente.`;
 
 const fallbackTemplate = ({ customerName, stage, facts }) => {
   if (stage === "welcome") {
-    return `Hola ${customerName}, soy NendoBot, asesor de NendoShop. Puedo ayudarte con pedidos, productos, devoluciones y cuenta. Si lo prefieres, puedes decirme 1) pedidos, 2) productos, 3) devoluciones o 4) tu cuenta.`;
+    return `Hola ${customerName}, soy NendoBot, asesor de NendoShop. Puedo ayudarte con pedidos, productos, devoluciones y cuenta. No pediré contraseñas ni datos sensibles. Si lo prefieres, puedes decirme 1) pedidos, 2) productos, 3) devoluciones o 4) tu cuenta.`;
   }
   if (facts?.tipo === "producto") {
     const [p] = facts.productos || [];

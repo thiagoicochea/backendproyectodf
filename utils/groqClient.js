@@ -39,7 +39,10 @@ const getGroqApiKey = async () => {
   }
 
   try {
-    const config = await Config.findOne().lean();
+    const config = await Promise.race([
+      Config.findOne().lean(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("timeout de configuración")), 1500))
+    ]);
     const apiConfig = config?.apiComentarios?.find(
       (item) => item.key === "apiComentarios"
     );
