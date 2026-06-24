@@ -6,6 +6,7 @@ const User = require("../models/User");
 const verifyToken = require("../middlewares/verifyToken");
 const isAdmin = require("../middlewares/isAdmin");
 const { recordLog } = require("../utils/logger");
+const { validateAdminClientField } = require("../utils/validation");
 
 router.get("/", verifyToken, isAdmin, async (req, res) => {
  const users = await User.find();
@@ -15,10 +16,9 @@ router.get("/", verifyToken, isAdmin, async (req, res) => {
 router.patch("/:id/email", verifyToken, isAdmin, async (req, res) => {
   try {
     const email = req.body.email;
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ message: "Email inválido" });
+    const validationError = validateAdminClientField("email", email);
+    if (validationError) {
+      return res.status(400).json({ message: validationError });
     }
 
     const exists = await User.findOne({
@@ -45,6 +45,11 @@ router.patch("/:id/email", verifyToken, isAdmin, async (req, res) => {
 });
 
 router.patch("/:id/phone", verifyToken, isAdmin, async (req, res) => {
+  const validationError = validateAdminClientField("phone", req.body.phone);
+  if (validationError) {
+    return res.status(400).json({ message: validationError });
+  }
+
   const user = await User.findByIdAndUpdate(
     req.params.id,
     { phone: req.body.phone },
@@ -55,6 +60,11 @@ router.patch("/:id/phone", verifyToken, isAdmin, async (req, res) => {
 });
 
 router.patch("/:id/name", verifyToken, isAdmin, async (req, res) => {
+  const validationError = validateAdminClientField("name", req.body.name);
+  if (validationError) {
+    return res.status(400).json({ message: validationError });
+  }
+
   const user = await User.findByIdAndUpdate(
     req.params.id,
     { name: req.body.name },
@@ -65,6 +75,11 @@ router.patch("/:id/name", verifyToken, isAdmin, async (req, res) => {
 });
 
 router.patch("/:id/city", verifyToken, isAdmin, async (req, res) => {
+  const validationError = validateAdminClientField("city", req.body.city);
+  if (validationError) {
+    return res.status(400).json({ message: validationError });
+  }
+
   const user = await User.findByIdAndUpdate(
     req.params.id,
     { city: req.body.city },
@@ -75,6 +90,10 @@ router.patch("/:id/city", verifyToken, isAdmin, async (req, res) => {
 });
 
 router.patch("/:id/password", verifyToken, isAdmin, async (req, res) => {
+  const validationError = validateAdminClientField("password", req.body.password);
+  if (validationError) {
+    return res.status(400).json({ message: validationError });
+  }
 
   const hashed = await bcrypt.hash(req.body.password, 10);
 

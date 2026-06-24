@@ -15,7 +15,7 @@ const resendClient = resendApiKey ? new Resend(resendApiKey) : null;
 const User = require("../models/User");
 const verifyToken = require("../middlewares/verifyToken");
 const { recordLog } = require("../utils/logger");
-const { validateRegistrationPayload } = require("../utils/validation");
+const { validateRegistrationPayload, validateProfilePayload } = require("../utils/validation");
 
 const OTP_EXPIRE_MS = 5 * 60 * 1000;
 const RESEND_WAIT_MS = 30 * 1000;
@@ -453,6 +453,19 @@ router.post("/verify-2fa", async (req, res) => {
       }
 
       const payload = pendingProfileEntry.payload || pendingProfileEntry;
+      const { isValid, errors } = validateProfilePayload(payload);
+      if (!isValid) {
+        return res.status(400).json({ message: errors.join(" ") });
+      }
+
+      if (payload.email && normalizeEmail(payload.email) !== normalizeEmail(user.email)) {
+        const existingUser = await User.findOne({ email: normalizeEmail(payload.email) });
+        if (existingUser) {
+          return res.status(409).json({ message: "El correo ya está registrado por otro usuario." });
+        }
+      }
+
+      user.email = payload.email || user.email;
       user.name = payload.name || user.name;
       user.lastname = payload.lastname || user.lastname;
       user.phone = payload.phone || user.phone;
@@ -612,9 +625,21 @@ router.post("/profile-update-request", verifyToken, async (req, res) => {
       return res.status(400).json({ message: "Datos de perfil inválidos" });
     }
 
+    const { isValid, errors } = validateProfilePayload(payload);
+    if (!isValid) {
+      return res.status(400).json({ message: errors.join(" ") });
+    }
+
     const user = await User.findById(req.user.id);
     if (!user) {
       return res.status(404).json({ message: "Usuario no encontrado" });
+    }
+
+    if (payload.email && normalizeEmail(payload.email) !== normalizeEmail(user.email)) {
+      const existingUser = await User.findOne({ email: normalizeEmail(payload.email) });
+      if (existingUser) {
+        return res.status(409).json({ message: "El correo ya está registrado por otro usuario." });
+      }
     }
 
     const code = generateCode();
@@ -655,6 +680,10 @@ router.post("/change-password-request", verifyToken, async (req, res) => {
 
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ message: "Contraseña actual y nueva son requeridas" });
+    }
+
+    if (!/^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/.test(String(newPassword))) {
+      return res.status(400).json({ message: "La nueva contraseña debe tener al menos 8 caracteres, una letra, un número y un símbolo." });
     }
 
     const user = await User.findById(req.user.id);
@@ -706,6 +735,10 @@ router.post("/forgot-password", async (req, res) => {
 
     if (!normalizedEmail || !newPassword) {
       return res.status(400).json({ message: "Correo y nueva contraseña requeridos" });
+    }
+
+    if (!/^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/.test(String(newPassword))) {
+      return res.status(400).json({ message: "La nueva contraseña debe tener al menos 8 caracteres, una letra, un número y un símbolo." });
     }
 
     const user = await User.findOne({ email });

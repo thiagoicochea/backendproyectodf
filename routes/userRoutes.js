@@ -67,6 +67,13 @@ router.put(
 
             }
 
+            if (req.body.email && req.body.email !== user.email) {
+                const existingUser = await User.findOne({ email: req.body.email.toLowerCase().trim() });
+                if (existingUser) {
+                    return res.status(409).json({ message: "El correo ya está registrado por otro usuario." });
+                }
+            }
+
             user.email =
                 req.body.email || user.email;
 
