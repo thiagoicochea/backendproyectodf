@@ -212,6 +212,40 @@ router.get("/", async (req, res) => {
   res.json(products);
 });
 
+router.post("/:id/like", async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) {
+      return res.status(404).json({ message: "Producto no encontrado" });
+    }
+
+    product.likes = (product.likes || 0) + 1;
+    await product.save();
+
+    res.json({ message: "Like agregado", product });
+  } catch (error) {
+    console.error("Like error:", error);
+    res.status(500).json({ message: "Error al registrar like" });
+  }
+});
+
+router.post("/:id/dislike", async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) {
+      return res.status(404).json({ message: "Producto no encontrado" });
+    }
+
+    product.dislikes = (product.dislikes || 0) + 1;
+    await product.save();
+
+    res.json({ message: "Dislike agregado", product });
+  } catch (error) {
+    console.error("Dislike error:", error);
+    res.status(500).json({ message: "Error al registrar dislike" });
+  }
+});
+
 router.get("/:id", async (req, res) => {
   const product = await Product.findById(req.params.id);
   res.json(product);

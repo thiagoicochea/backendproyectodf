@@ -10,6 +10,23 @@ const priceRegex = /^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/;
 const stockRegex = /^\d+$/;
 const discountRegex = /^(?:0|[1-9]\d{0,1}|100)$/;
 
+const isAdult = (value) => {
+  if (!value) return false;
+
+  const birthDate = new Date(value);
+  if (Number.isNaN(birthDate.getTime())) return false;
+
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age -= 1;
+  }
+
+  return age >= 18;
+};
+
 const validateRegistrationPayload = (payload) => {
   const errors = [];
 
@@ -43,6 +60,8 @@ const validateRegistrationPayload = (payload) => {
 
   if (!payload?.birthdate) {
     errors.push("Fecha de nacimiento requerida.");
+  } else if (!isAdult(payload.birthdate)) {
+    errors.push("Debes ser mayor o igual a 18 años para registrarte.");
   }
 
   if (!payload?.sex) {
@@ -80,6 +99,10 @@ const validateProfilePayload = (payload) => {
 
   if (payload?.city !== undefined && !cityRegex.test(String(payload.city).trim())) {
     errors.push("Ciudad inválida. Usa solo letras y espacios.");
+  }
+
+  if (payload?.birthdate !== undefined && !isAdult(payload.birthdate)) {
+    errors.push("Debes ser mayor o igual a 18 años para actualizar tu perfil.");
   }
 
   return {
