@@ -3,6 +3,7 @@ const router = express.Router();
 
 const Product = require("../models/Product");
 const wsBroadcast = require("../utils/wsBroadcast");
+const verifyToken = require("../middlewares/verifyToken");
 const { getGroqApiKey, callGroq, parseGroqJson } = require("../utils/groqClient");
 
 const commentCooldown = new Map();
@@ -212,13 +213,27 @@ router.get("/", async (req, res) => {
   res.json(products);
 });
 
-router.post("/:id/like", async (req, res) => {
+router.post("/:id/like", verifyToken, async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
     if (!product) {
       return res.status(404).json({ message: "Producto no encontrado" });
     }
 
+    const userId = req.user?.id;
+    const liked = (product.likedBy || []).some((id) => String(id) === String(userId));
+    const disliked = (product.dislikedBy || []).some((id) => String(id) === String(userId));
+
+    if (liked) {
+      return res.status(409).json({ message: "Ya registraste este like." });
+    }
+
+    if (disliked) {
+      product.dislikedBy = (product.dislikedBy || []).filter((id) => String(id) !== String(userId));
+      product.dislikes = Math.max(0, (product.dislikes || 0) - 1);
+    }
+
+    product.likedBy = [...(product.likedBy || []), userId];
     product.likes = (product.likes || 0) + 1;
     await product.save();
 
@@ -229,13 +244,27 @@ router.post("/:id/like", async (req, res) => {
   }
 });
 
-router.post("/:id/dislike", async (req, res) => {
+router.post("/:id/dislike", verifyToken, async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
     if (!product) {
       return res.status(404).json({ message: "Producto no encontrado" });
     }
 
+    const userId = req.user?.id;
+    const disliked = (product.dislikedBy || []).some((id) => String(id) === String(userId));
+    const liked = (product.likedBy || []).some((id) => String(id) === String(userId));
+
+    if (disliked) {
+      return res.status(409).json({ message: "Ya registraste este dislike." });
+    }
+
+    if (liked) {
+      product.likedBy = (product.likedBy || []).filter((id) => String(id) !== String(userId));
+      product.likes = Math.max(0, (product.likes || 0) - 1);
+    }
+
+    product.dislikedBy = [...(product.dislikedBy || []), userId];
     product.dislikes = (product.dislikes || 0) + 1;
     await product.save();
 
