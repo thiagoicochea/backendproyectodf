@@ -5,6 +5,27 @@ const Product = require("../models/Product");
 const wsBroadcast = require("../utils/wsBroadcast");
 const { getGroqApiKey, callGroq, parseGroqJson } = require("../utils/groqClient");
 
+const commentCooldown = new Map();
+
+const antiSpam = (req, res, next) => {
+  const userId = req.user?.id || req.body?.user || req.headers["x-user-id"];
+
+  if (!userId) {
+    return next();
+  }
+
+  const lastComment = commentCooldown.get(userId);
+  if (lastComment && Date.now() - lastComment < 10000) {
+    return res.status(429).json({
+      success: false,
+      message: "Debes esperar 10 segundos antes de comentar nuevamente."
+    });
+  }
+
+  commentCooldown.set(userId, Date.now());
+  next();
+};
+
 const MODERATION_PROMPT = (comment) => `Eres un clasificador de comentarios en español para una tienda de figuras coleccionables. Responde ÚNICAMENTE con un JSON válido con las llaves: allowed, block, category, reason.
 - Si el comentario es una opinión, califícalo como "apropiado" siempre que no contenga insultos directos, amenazas, agresividad explícita o contenido sexual/pornográfico explícito.
 - Si el comentario incluye insultos, lenguaje sexual explícito, pornografía, agresividad o amenazas, califícalo como "inapropiado".
@@ -44,7 +65,7 @@ router.get("/:id", async (req, res) => {
   res.json(product);
 });
 
-router.post("/:id/comments", async (req, res) => {
+router.post("/:id/comments", antiSpam, async (req, res) => {
   try {
     const { text, rating, user } = req.body;
 
