@@ -7,6 +7,100 @@ const { getGroqApiKey, callGroq, parseGroqJson } = require("../utils/groqClient"
 
 const commentCooldown = new Map();
 
+const normalizeSearchText = (value) => String(value || "")
+  .toLowerCase()
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .replace(/[^a-z0-9 ]/g, " ")
+  .replace(/\s+/g, " ")
+  .trim();
+
+const scoreProductMatch = (product, query) => {
+  const normalizedQuery = normalizeSearchText(query);
+  if (!normalizedQuery) return 0;
+
+  const terms = normalizedQuery.split(" ").filter(Boolean);
+  const name = normalizeSearchText(product.name || "");
+  const description = normalizeSearchText(product.description || "");
+  const category = normalizeSearchText(product.specs?.categoria || "");
+  const brand = normalizeSearchText(product.specs?.marca || "");
+  const priceText = normalizeSearchText(String(product.price || ""));
+
+  let score = 0;
+
+  if (name.includes(normalizedQuery)) {
+    score += 80;
+  } else if (name.includes(terms[0] || "")) {
+    score += 40;
+  }
+
+  terms.forEach((term) => {
+    if (!term) return;
+    if (name.includes(term)) score += 20;
+    if (description.includes(term)) score += 10;
+    if (category.includes(term)) score += 8;
+    if (brand.includes(term)) score += 8;
+  });
+
+  if (priceText.includes(normalizedQuery)) score += 15;
+
+  const priceMatch = normalizedQuery.match(/\b(\d{1,3}(?:[.,]\d{1,2})?)\b/g);
+  if (priceMatch?.length) {
+    const numericQuery = Number(priceMatch[0].replace(",", "."));
+    const numericPrice = Number(product.price || 0);
+    if (!Number.isNaN(numericQuery) && !Number.isNaN(numericPrice)) {
+      if (numericPrice === numericQuery) score += 25;
+      else if (Math.abs(numericPrice - numericQuery) <= 10) score += 12;
+    }
+  }
+
+  return score;
+};
+
+const buildProductSearchSummary = (product) => {
+  const category = product.specs?.categoria || "";
+  const brand = product.specs?.marca || "";
+  return `${product.name} | ${product.description || ""} | ${category} | ${brand} | S/. ${product.price || 0}`;
+};
+
+const getLocalProductMatches = (products, query) => {
+  const normalizedQuery = normalizeSearchText(query);
+  if (!normalizedQuery) {
+    return [...products].sort((a, b) => Number(a.price || 0) - Number(b.price || 0)).slice(0, 20);
+  }
+
+  return products
+    .map((product) => ({ product, score: scoreProductMatch(product, query) }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((entry) => entry.product)
+    .slice(0, 20);
+};
+
+const SEARCH_PROMPT = (query, productsSummary) => `Eres un asistente de búsqueda para una tienda de figuras coleccionables. Analiza la consulta del usuario y responde ÚNICAMENTE con JSON válido con estas llaves: searchQuery, productNames, reason.
+- searchQuery debe ser una versión refinada de la consulta del usuario.
+- productNames debe ser un arreglo con los nombres de productos que mejor encajan con la consulta.
+- Usa solo los nombres que aparecen en la siguiente lista de productos.
+Consulta: "${query}"
+Productos:
+${productsSummary}`;
+
+const moderateSearchIntentWithGroq = async (query, productsSummary) => {
+  const apiKey = await getGroqApiKey();
+  if (!apiKey) return null;
+
+  const text = await callGroq({
+    apiKey,
+    input: SEARCH_PROMPT(query, productsSummary),
+    temperature: 0,
+    maxOutputTokens: 300,
+    onFallback: () => JSON.stringify({ searchQuery: query, productNames: [], reason: "fallback" })
+  });
+
+  const parsed = parseGroqJson(text);
+  return parsed;
+};
+
 const antiSpam = (req, res, next) => {
   const userId = req.user?.id || req.body?.user || req.headers["x-user-id"];
 
@@ -54,6 +148,64 @@ const moderateCommentWithGroq = async (apiKey, comment) => {
   }
   return parsed;
 };
+
+router.get("/search", async (req, res) => {
+  try {
+    const query = String(req.query.query || "").trim();
+    const products = await Product.find().lean();
+    let matches = getLocalProductMatches(products, query);
+    let appliedBy = "local";
+
+    if (query) {
+      try {
+        const groqKey = await getGroqApiKey();
+        if (groqKey) {
+          const aiResult = await moderateSearchIntentWithGroq(
+            query,
+            products.slice(0, 40).map(buildProductSearchSummary).join("\n")
+          );
+
+          if (aiResult?.productNames?.length) {
+            const preferredNames = aiResult.productNames
+              .map((name) => String(name || "").trim())
+              .filter(Boolean);
+
+            const aiMatches = products.filter((product) =>
+              preferredNames.some((name) =>
+                normalizeSearchText(product.name).includes(normalizeSearchText(name)) ||
+                normalizeSearchText(name).includes(normalizeSearchText(product.name))
+              )
+            );
+
+            if (aiMatches.length) {
+              matches = aiMatches.slice(0, 20);
+              appliedBy = "groq";
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Search intent error:", error);
+      }
+    }
+
+    res.json({ query, appliedBy, products: matches });
+  } catch (error) {
+    console.error("Search error:", error);
+    res.status(500).json({ message: "Error al buscar productos" });
+  }
+});
+
+router.post("/search-intent", async (req, res) => {
+  try {
+    const query = String(req.body?.query || "").trim();
+    const products = await Product.find().lean();
+    const matches = getLocalProductMatches(products, query);
+    res.json({ query, appliedBy: "local", products: matches });
+  } catch (error) {
+    console.error("Search intent error:", error);
+    res.status(500).json({ message: "Error al interpretar la búsqueda" });
+  }
+});
 
 router.get("/", async (req, res) => {
   const products = await Product.find();
