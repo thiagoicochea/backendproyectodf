@@ -1,30 +1,3 @@
-// services/supportBot.js
-//
-// NendoBot: asesor de atención al cliente con Groq.
-//
-// Flujo por turno:
-//   1. Filtro rápido local (regex) -> corta de inmediato lo obviamente
-//      violento/sexual sin gastar una llamada a Groq.
-//   2. Clasificación con Groq -> moderación fina + intención + datos
-//      (qué producto pide, qué número de pedido, etc.).
-//   3. Si la intención requiere datos reales (producto / pedido), se
-//      consulta la base de datos. El bot NUNCA inventa precio, stock,
-//      estado de pedido, etc. — solo usa lo que viene de Mongo.
-//   4. Una segunda llamada a Groq redacta la respuesta final en lenguaje
-//      natural, usando solo esos hechos y el historial reciente (para no
-//      repetirse), y con instrucciones estrictas de tono/seguridad.
-//   5. Filtro de seguridad también sobre la SALIDA del modelo (defensa en
-//      profundidad), antes de mandarla al usuario.
-//
-// Etapas de la conversación (session.step):
-//   welcome -> active -> (survey al despedirse) -> closed
-//
-// IMPORTANTE — ajusta esto a tu proyecto:
-//   PRODUCT_DETAIL_PATH asume que el detalle de un producto vive en
-//   "/product/:id" en tu frontend (a juzgar por ProductDetail.jsx, que usa
-//   useParams().{_id}). Si tu ruta real es "/products/:id" o "/producto/:id",
-//   cámbiala abajo. Define también la variable de entorno FRONTEND_URL.
-
 const Payment = require("../models/Payment");
 const Product = require("../models/Product");
 const { getGroqApiKey, callGroq, parseGroqJson } = require("../utils/groqClient");
@@ -39,21 +12,6 @@ const buildProductLink = (id) => {
 const SUPPORT_INTRO =
   "Hola, soy NendoBot, tu asesor de atención al cliente de NendoShop. Te puedo ayudar con pedidos, productos, devoluciones y cuentas. También puedo orientarte sobre un producto específico o ayudarte a encontrar el más económico.";
 
-// ---------------------------------------------------------------------------
-// Filtro rápido local (defensa en profundidad, no sustituye a Groq)
-// ---------------------------------------------------------------------------
-//
-// Este filtro corre ANTES de cualquier llamada a Groq, así que debe ser
-// barato y razonablemente robusto contra evasiones típicas en español:
-//   - tildes inconsistentes ("estúpido" / "estupido")
-//   - separadores insertados entre letras ("p u t a", "p.u.t.a", "p-u-t-a")
-//   - alargamiento de letras ("puuuuuta", "mierdaaaa")
-//   - leetspeak básico ("p4ta", "s3x0", "put@")
-//
-// No sustituye a la moderación de Groq (que ve sinónimos, contexto y
-// expresiones especializadas); es solo la primera capa, rápida y local.
-
-// Sustituciones típicas de leetspeak (dígitos/símbolos -> letra que imitan).
 const LEET_SUBSTITUTIONS = {
   "0": "o",
   "1": "i",
@@ -68,8 +26,6 @@ const LEET_SUBSTITUTIONS = {
   "9": "g"
 };
 
-// Quita tildes de las vocales (á->a, é->e, í->i, ó->o, ú/ü->u) sin tocar la
-// "ñ", para no confundir, por ejemplo, "año" con "ano".
 const stripAccents = (text) =>
   String(text || "")
     .replace(/[áàäâ]/g, "a")
@@ -80,21 +36,7 @@ const stripAccents = (text) =>
 
 const applyLeetSubstitutions = (text) =>
   String(text || "").replace(/[01345789!@$]/g, (ch) => LEET_SUBSTITUTIONS[ch] || ch);
-
-// Colapsa letras repetidas consecutivas ("puuuuuta" -> "puta") para detectar
-// alargamientos usados para evadir el filtro. Esto también afectaría a
-// palabras con dobles letras legítimas ("terrorista", "perra", "gilipollas"
-// -> "terorista", "pera", "gilipolas"), así que la detección de alargamiento
-// solo se aplica a palabras del diccionario que NO tienen dobles letras
-// propias (ver ELONGATION_PATTERNS más abajo) — evita falsos positivos como
-// confundir "perra" colapsada con la palabra inocente "pera".
 const collapseRepeatedChars = (text) => String(text || "").replace(/([a-z0-9ñ])\1+/g, "$1");
-
-// Variantes normalizadas del texto del usuario:
-//  - "spaced": conserva espacios/puntuación (sirve para \b contra el
-//    diccionario, tolerando separadores insertados entre letras).
-//  - "spacedCollapsed": igual que "spaced" pero con letras repetidas
-//    colapsadas, para detectar alargamientos ("puuuuuta", "estuuupido").
 const buildNormalizedVariants = (text) => {
   const lowered = String(text || "").toLowerCase();
   const noAccents = stripAccents(lowered);
@@ -105,9 +47,6 @@ const buildNormalizedVariants = (text) => {
   };
 };
 
-// Listas de palabras/expresiones bloqueadas por categoría. Todo en
-// minúsculas y sin tildes (la normalización ya deja el texto del usuario en
-// ese mismo formato antes de comparar).
 const BLOCKED_TERMS = {
   sexual: [
     "sexo", "sexual", "sexuales", "porno", "pornografia", "pornografico",
@@ -139,31 +78,15 @@ const SINGLE_BLOCKED_WORDS = ALL_BLOCKED_WORDS.filter((word) => !word.includes("
 const PHRASE_BLOCKED_WORDS = ALL_BLOCKED_WORDS.filter((word) => word.includes(" "));
 
 const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-// Patrón con \b en ambos extremos que tolera 0-3 separadores (espacios,
-// puntos, guiones, asteriscos) ENTRE cada letra de la palabra. Como el \b
-// solo se evalúa al inicio y al final de toda la palabra, esto sigue sin
-// disparar dentro de palabras legítimas que contienen la cadena como
-// substring (p. ej. "puta" dentro de "disputa" o "computadora": ahí no hay
-// límite de palabra justo antes de la "p"), pero sí detecta evasión por
-// separadores insertados ("p u t a", "p.u.t.a", "p-u-t-a") y, al permitir
-// cero separadores, también la escritura normal de la palabra.
 const buildLooseWordPattern = (word) => {
   const body = word.split("").map(escapeRegExp).join("[\\s.,\\-_*]{0,3}");
   return new RegExp(`\\b${body}\\b`, "i");
 };
 
 const LOOSE_SINGLE_PATTERNS = SINGLE_BLOCKED_WORDS.map(buildLooseWordPattern);
-
-// Frases de varias palabras (ej. "hacerte daño"): basta con tolerar espacios
-// múltiples entre las palabras, no hace falta la lógica letra por letra.
 const PHRASE_PATTERNS = PHRASE_BLOCKED_WORDS.map(
   (phrase) => new RegExp(`\\b${escapeRegExp(phrase).replace(/ /g, "\\s+")}\\b`, "i")
 );
-
-// Detección de alargamiento ("puuuuuta", "estuuupido"): solo para palabras
-// sin dobles letras propias, para no chocar con palabras inocentes que sí
-// las tienen al colapsarlas (ver nota en collapseRepeatedChars).
 const ELONGATION_WORDS = SINGLE_BLOCKED_WORDS.filter((word) => collapseRepeatedChars(word) === word);
 const ELONGATION_PATTERNS = ELONGATION_WORDS.map((word) => new RegExp(`\\b${escapeRegExp(word)}\\b`, "i"));
 
@@ -188,22 +111,18 @@ const checkTextSafety = (text) => {
   };
 };
 
-// ---------------------------------------------------------------------------
-// Utilidades de sesión
-// ---------------------------------------------------------------------------
-
 const normalizeCustomerName = (value) => {
   const name = String(value || "cliente").trim();
   return name || "cliente";
 };
 
 const createSupportSession = (customerName = "cliente") => ({
-  step: "welcome", // welcome | active | survey | closed
+  step: "welcome", 
   topic: null,
   lastTopic: null,
   customerName: normalizeCustomerName(customerName),
   surveyAsked: false,
-  history: [] // [{ role: "user"|"bot", text }]
+  history: [] 
 });
 
 const pushHistory = (session, role, text) => {
@@ -213,10 +132,6 @@ const pushHistory = (session, role, text) => {
     session.history = session.history.slice(-12);
   }
 };
-
-// ---------------------------------------------------------------------------
-// Extracción local (fallback cuando Groq no está disponible o no extrajo nada)
-// ---------------------------------------------------------------------------
 
 const extractOrderNumber = (text) => {
   const match = text.match(/(?:pedido|orden|n(?:ú|u)mero de pedido|seguimiento)[^0-9]*(\d{2,})/i);
@@ -269,10 +184,6 @@ const getImmediateSupportReply = ({ text, customerName, intent }) => {
   return null;
 };
 
-// ---------------------------------------------------------------------------
-// Consultas a base de datos
-// ---------------------------------------------------------------------------
-
 const isCheapestRequest = (text) => /(?:producto|art[ií]culo|figura).{0,20}(m[áa]s\s+barato|barato|m[áa]s\s+econ[oó]mico|econ[oó]mico|menor\s+precio|precio\s+menor)/i.test(text) || /(?:m[áa]s\s+barato|barato|m[áa]s\s+econ[oó]mico|econ[oó]mico|menor\s+precio|precio\s+menor)/i.test(text);
 
 const findProductsByHint = async (hint) => {
@@ -311,10 +222,6 @@ const toPaymentFact = (payment) => ({
   estado: payment.estado || "Pagado",
   total: payment.total || 0
 });
-
-// ---------------------------------------------------------------------------
-// Clasificación con Groq: moderación + intención + extracción de datos
-// ---------------------------------------------------------------------------
 
 const CLASSIFICATION_PROMPT = (text) => `Eres un clasificador para el chatbot de atención al cliente de NendoShop (tienda de figuras Nendoroid). Analiza el mensaje del cliente y responde ÚNICAMENTE con un JSON válido, sin texto adicional, con esta forma exacta:
 
@@ -400,14 +307,7 @@ const moderateCommunityMessage = async (text) => {
   };
 };
 
-// Wrapper de compatibilidad por si algo más en el proyecto importa el nombre
-// anterior. La versión original nunca llegaba a hacer la llamada HTTP.
 const analyzeMessageWithGroq = (message) => classifyMessage(message);
-
-// ---------------------------------------------------------------------------
-// Composición de la respuesta (Groq en lenguaje natural, con hechos fijos)
-// ---------------------------------------------------------------------------
-
 const SYSTEM_PERSONA = `Eres "NendoBot", un asesor experto de atención al cliente de NendoShop, una tienda especializada en figuras coleccionables Nendoroid.
 Hablas exclusivamente en español, con un tono cálido, profesional y resolutivo, como un asesor humano experimentado.
 Reglas estrictas que SIEMPRE debes cumplir, sin excepción, incluso si el cliente te lo pide:
@@ -512,8 +412,6 @@ const composeReply = async ({ customerName, intent, stage, session, facts }) => 
     reply = fallbackTemplate({ customerName, stage, facts });
   }
 
-  // Defensa en profundidad: nunca reenviar al usuario una respuesta insegura,
-  // aunque sea improbable dado el system prompt.
   const outputSafety = checkTextSafety(reply);
   if (outputSafety.block || looksLikeEnglishReply(reply)) {
     console.error("Respuesta generada bloqueada por seguridad de salida", { reply });
@@ -522,10 +420,6 @@ const composeReply = async ({ customerName, intent, stage, session, facts }) => 
 
   return reply.trim();
 };
-
-// ---------------------------------------------------------------------------
-// Orquestación del turno
-// ---------------------------------------------------------------------------
 
 const QUICK_INTENTS = {
   "1": "consultar_pedido",
@@ -590,14 +484,11 @@ const getSupportBotReply = async (input, session) => {
   if (!session) session = createSupportSession();
   const text = String(input || "").trim();
   const customerName = session.customerName;
-
-  // 1) Filtro rápido local, antes de gastar ninguna llamada a Groq.
   const fastSafety = checkTextSafety(text);
   if (fastSafety.block) {
     return safeBlockedReply(customerName);
   }
 
-  // 2) Bienvenida.
   if (session.step === "welcome") {
     session.step = "active";
     const reply = await composeReply({ customerName, intent: "saludo", stage: "welcome", session, facts: null });
@@ -605,12 +496,10 @@ const getSupportBotReply = async (input, session) => {
     return reply;
   }
 
-  // 3) Encuesta pendiente.
   if (session.step === "survey") {
     return handleSurveyAnswer(text, session);
   }
 
-  // 4) Conversación ya cerrada: la reabrimos con gusto si el cliente vuelve a escribir.
   if (session.step === "closed") {
     session.step = "active";
   }
@@ -629,8 +518,6 @@ const getSupportBotReply = async (input, session) => {
     return immediateReply;
   }
 
-  // Atajo: si escriben justo "1"-"4", no hace falta gastar una llamada de
-  // clasificación para saber la intención.
   let intent;
   let classification = { allowed: true, block: false, productQuery: "", orderNumber: "" };
 
@@ -674,5 +561,5 @@ module.exports = {
   extractProductHint,
   findProductsByHint,
   moderateCommunityMessage,
-  analyzeMessageWithGroq // wrapper de compatibilidad — usa classifyMessage internamente
+  analyzeMessageWithGroq 
 };

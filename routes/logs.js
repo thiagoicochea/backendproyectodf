@@ -6,7 +6,6 @@ const isAdmin = require("../middlewares/isAdmin");
 
 router.get("/", verifyToken, isAdmin, async (req, res) => {
     try {
-        //  .sort({ createdAt: -1 }) trae los más recientes primero
         const logs = await Log.find().sort({ createdAt: -1 });
         res.json(logs);
     } catch (error) {

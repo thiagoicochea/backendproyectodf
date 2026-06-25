@@ -40,8 +40,6 @@ router.get(
     }
 );
 
-
-
 router.put(
     "/profile",
     verifyToken,

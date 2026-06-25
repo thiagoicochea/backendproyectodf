@@ -1,13 +1,5 @@
-// utils/groqClient.js
-//
-// Helper compartido para hablar con el endpoint "responses" de Groq.
-// Centraliza: extracción de la API key desde Config, la llamada HTTPS con
-// reintentos, y el parseo de JSON — así el bot de soporte y la moderación
-// de comentarios usan exactamente el mismo código probado.
-
 const https = require("https");
 const Config = require("../models/Config");
-
 const GROQ_HOST = "api.groq.com";
 const GROQ_PATH = "/openai/v1/responses";
 const DEFAULT_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
@@ -30,9 +22,6 @@ const extractGroqKey = (value) => {
   return match ? match[1] : candidate;
 };
 
-// La API key se guarda en un documento Config con un array `apiComentarios`
-// que contiene { key: "apiComentarios", value: "<key o url con la key>" }.
-// Tanto la moderación de comentarios como el bot reutilizan esa misma key.
 const getGroqApiKey = async () => {
   if (process.env.GROQ_API_KEY) {
     return extractGroqKey(process.env.GROQ_API_KEY);
@@ -69,7 +58,6 @@ const extractOutputText = (value) => {
   return "";
 };
 
-// Una sola llamada cruda a Groq. Resuelve con el TEXTO que devolvió el modelo.
 const requestGroqOnce = (apiKey, payload) => {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify(payload);
@@ -116,9 +104,6 @@ const requestGroqOnce = (apiKey, payload) => {
   });
 };
 
-// Llama a Groq con reintentos + backoff simple. `onFallback` deja que el
-// llamador decida qué devolver si todos los intentos fallan, en vez de
-// romper el flujo de cara al usuario.
 const callGroq = async ({
   apiKey,
   input,
@@ -158,9 +143,6 @@ const callGroq = async ({
   throw lastError;
 };
 
-// Quita fences ```json, etc. y parsea el primer bloque {...} en el texto
-// de respuesta del modelo. Nunca lanza error: devuelve null si no puede
-// parsear, para que el llamador decida cómo fallar de forma segura.
 const parseGroqJson = (text) => {
   if (!text) return null;
   const match = text.match(/\{[\s\S]*\}/);

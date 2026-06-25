@@ -7,12 +7,10 @@ require("dotenv").config();
 mongoose.connect(process.env.MONGO_URI)
 .then(async () => {
 
-    // eliminar admin anterior
     await User.deleteMany({
         role: "admin"
     });
 
-    // crear admin
     await User.create({
 
         name: "Thiago",

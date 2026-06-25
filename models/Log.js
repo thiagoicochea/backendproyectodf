@@ -18,7 +18,6 @@ const LogSchema = new mongoose.Schema({
         enum: ["TRANSACCION", "ERROR", "SISTEMA", "AUTH"], 
         required: true 
     },
-    // ---- Nuevos campos de nivel Auditoría de Seguridad ----
     metodo: {
         type: String,
         required: true

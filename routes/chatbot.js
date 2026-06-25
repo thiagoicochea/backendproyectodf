@@ -1,11 +1,3 @@
-// routes/chatbot.js
-//
-// Endpoint mínimo para conectar el frontend con NendoBot.
-// Las sesiones viven en memoria por sessionId mientras corre el proceso.
-// Si despliegas con varias instancias/réplicas, cambia este Map por Redis
-// (u otro store compartido) para que la conversación no se "reinicie" si
-// el balanceador te manda a otra instancia.
-
 const express = require("express");
 const router = express.Router();
 
@@ -36,8 +28,6 @@ router.post("/message", async (req, res) => {
   }
 });
 
-// Útil para que el frontend pueda "reiniciar" la conversación manualmente
-// (por ejemplo con un botón "nueva conversación").
 router.post("/reset", (req, res) => {
   const { sessionId } = req.body;
   if (sessionId) sessions.delete(sessionId);
