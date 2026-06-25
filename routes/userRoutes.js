@@ -4,6 +4,7 @@ const router = express.Router();
 
 const User = require("../models/User");
 const { validateProfilePayload } = require("../utils/validation");
+const { recordLog } = require("../utils/logger");
 
 const verifyToken =
     require("../middlewares/verifyToken");
@@ -29,6 +30,15 @@ router.get(
 
             }
 
+            await recordLog({
+                req,
+                usuario: user.email,
+                descripcion: "Perfil consultado",
+                tipo: "TRANSACCION",
+                metodo: req.method,
+                ruta: req.originalUrl
+            });
+
             res.json(user);
 
         } catch (error) {
@@ -46,6 +56,15 @@ router.put(
     async (req, res) => {
 
         try {
+            await recordLog({
+                req,
+                usuario: req.user?.email || req.user?.id || "Anónimo",
+                descripcion: "Solicitud de actualización de perfil",
+                tipo: "TRANSACCION",
+                metodo: req.method,
+                ruta: req.originalUrl
+            });
+
             const { isValid, errors } = validateProfilePayload(req.body);
 
             if (!isValid) {
@@ -72,53 +91,61 @@ router.put(
                 }
             }
 
-            user.email =
-                req.body.email || user.email;
+            if (req.body.email !== undefined) {
+                user.email = req.body.email;
+            }
 
-            user.name =
-                req.body.name || user.name;
+            if (req.body.name !== undefined) {
+                user.name = req.body.name;
+            }
 
-            user.lastname =
-                req.body.lastname || user.lastname;
+            if (req.body.lastname !== undefined) {
+                user.lastname = req.body.lastname;
+            }
 
-            user.phone =
-                req.body.phone || user.phone;
+            if (req.body.phone !== undefined) {
+                user.phone = req.body.phone;
+            }
 
-            user.address =
-                req.body.address || user.address;
+            if (req.body.address !== undefined) {
+                user.address = req.body.address;
+            }
 
-            user.city =
-                req.body.city || user.city;
+            if (req.body.city !== undefined) {
+                user.city = req.body.city;
+            }
 
-            user.birthdate =
-                req.body.birthdate || user.birthdate;
+            if (req.body.birthdate !== undefined) {
+                user.birthdate = req.body.birthdate;
+            }
 
-            user.sex =
-                req.body.sex || user.sex;
+            if (req.body.sex !== undefined) {
+                user.sex = req.body.sex;
+            }
 
-            user.profileImg =
-                req.body.profileImg || user.profileImg;
+            if (req.body.profileImg !== undefined) {
+                user.profileImg = req.body.profileImg;
+            }
 
-            if (req.body.paymentmethod) {
-
+            if (req.body.paymentmethod !== undefined) {
                 user.paymentmethod = {
-                
-                    nombretarjeta:
-                         req.body.paymentmethod.nombretarjeta,
-                    numerotarjeta:
-                        req.body.paymentmethod.numerotarjeta,
-
-                    cvv:
-                        req.body.paymentmethod.cvv,
-
-                    tipo:
-                        req.body.paymentmethod.tipo
-
+                    nombretarjeta: req.body.paymentmethod?.nombretarjeta,
+                    numerotarjeta: req.body.paymentmethod?.numerotarjeta,
+                    cvv: req.body.paymentmethod?.cvv,
+                    tipo: req.body.paymentmethod?.tipo
                 };
-
             }
 
             await user.save();
+
+            await recordLog({
+                req,
+                usuario: user.email,
+                descripcion: "Perfil actualizado correctamente",
+                tipo: "TRANSACCION",
+                metodo: req.method,
+                ruta: req.originalUrl
+            });
 
             res.json({
                 message: "Perfil actualizado",

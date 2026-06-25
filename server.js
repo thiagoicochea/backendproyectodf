@@ -10,6 +10,7 @@ const wsBroadcast = require("./utils/wsBroadcast");
 const authRoutes = require("./routes/authRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const ChatRoom = require("./models/ChatRoom");
+const { recordLog } = require("./utils/logger");
 
 const PORT = process.env.PORT || 4000;
 
@@ -18,6 +19,40 @@ const app = express();
 app.use(express.json());
 
 app.use(cookieParser());
+
+app.use((req, res, next) => {
+    const start = Date.now();
+
+    res.on("finish", () => {
+        const shouldLog = req.originalUrl?.startsWith("/api") || req.originalUrl === "/";
+        if (!shouldLog) return;
+
+        const description = `${req.method} ${req.originalUrl} -> ${res.statusCode}`;
+        recordLog({
+            req,
+            usuario: req.user?.email || req.user?.name || "Anónimo",
+            descripcion: description,
+            tipo: res.statusCode >= 400 ? "ERROR" : "TRANSACCION",
+            metodo: req.method,
+            ruta: req.originalUrl
+        }).catch(() => {});
+    });
+
+    res.on("close", () => {
+        if (Date.now() - start > 5000) {
+            recordLog({
+                req,
+                usuario: req.user?.email || req.user?.name || "Anónimo",
+                descripcion: `${req.method} ${req.originalUrl} terminó de forma inesperada`,
+                tipo: "ERROR",
+                metodo: req.method,
+                ruta: req.originalUrl
+            }).catch(() => {});
+        }
+    });
+
+    next();
+});
 
 app.use(cors({
     origin: ["https://nendoshop.onrender.com",   "http://localhost:3000",

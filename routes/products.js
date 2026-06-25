@@ -4,6 +4,7 @@ const router = express.Router();
 const Product = require("../models/Product");
 const wsBroadcast = require("../utils/wsBroadcast");
 const verifyToken = require("../middlewares/verifyToken");
+const { recordLog } = require("../utils/logger");
 const { getGroqApiKey, callGroq, parseGroqJson } = require("../utils/groqClient");
 
 const commentCooldown = new Map();
@@ -189,6 +190,15 @@ router.get("/search", async (req, res) => {
       }
     }
 
+    await recordLog({
+      req,
+      usuario: req.user?.email || req.user?.id || "Anónimo",
+      descripcion: `Búsqueda de productos: ${query}`,
+      tipo: "TRANSACCION",
+      metodo: req.method,
+      ruta: req.originalUrl
+    });
+
     res.json({ query, appliedBy, products: matches });
   } catch (error) {
     console.error("Search error:", error);
@@ -237,6 +247,15 @@ router.post("/:id/like", verifyToken, async (req, res) => {
     product.likes = (product.likes || 0) + 1;
     await product.save();
 
+    await recordLog({
+      req,
+      usuario: req.user?.email || req.user?.id || "Anónimo",
+      descripcion: `Like agregado al producto ${product._id}`,
+      tipo: "TRANSACCION",
+      metodo: req.method,
+      ruta: req.originalUrl
+    });
+
     res.json({ message: "Like agregado", product });
   } catch (error) {
     console.error("Like error:", error);
@@ -267,6 +286,15 @@ router.post("/:id/dislike", verifyToken, async (req, res) => {
     product.dislikedBy = [...(product.dislikedBy || []), userId];
     product.dislikes = (product.dislikes || 0) + 1;
     await product.save();
+
+    await recordLog({
+      req,
+      usuario: req.user?.email || req.user?.id || "Anónimo",
+      descripcion: `Dislike agregado al producto ${product._id}`,
+      tipo: "TRANSACCION",
+      metodo: req.method,
+      ruta: req.originalUrl
+    });
 
     res.json({ message: "Dislike agregado", product });
   } catch (error) {
@@ -354,6 +382,15 @@ router.post("/:id/comments", antiSpam, async (req, res) => {
     await product.save();
 
     wsBroadcast.broadcastCommentUpdate(req.params.id, product.comments);
+
+    await recordLog({
+      req,
+      usuario: user || "Anónimo",
+      descripcion: `Comentario agregado al producto ${product._id}`,
+      tipo: "TRANSACCION",
+      metodo: req.method,
+      ruta: req.originalUrl
+    });
 
     res.json({
       message: "Comentario agregado",
