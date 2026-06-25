@@ -86,7 +86,4 @@ router.patch("/:id/discount", verifyToken, isAdmin, async (req, res) => {
   res.json(product);
 });
 
-
-
-
 module.exports = router;

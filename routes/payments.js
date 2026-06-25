@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 const Payment = require("../models/Payment");
-const Log = require("../models/Log"); 
+const Log = require("../models/Log");
 const verifyToken = require("../middlewares/verifyToken");
 const isAdmin = require("../middlewares/isAdmin");
 const Product = require("../models/Product");
@@ -90,14 +90,14 @@ router.post("/", verifyToken, async (req, res) => {
         const userAgent = req.headers['user-agent'] || "Dispositivo Desconocido";
         const nuevoLog = new Log({
             ip: clientIp,
-            usuario: payment.cliente || "Anónimo", 
+            usuario: payment.cliente || "Anónimo",
             descripcion: `Compra registrada - Doc: ${payment.documento || 'N/A'} | Total: S/. ${payment.total}`,
             tipo: "TRANSACCION",
-            metodo: req.method,        
-            ruta: req.originalUrl,      
+            metodo: req.method,
+            ruta: req.originalUrl,
             userAgent: userAgent
         });
-        
+
         await nuevoLog.save();
         res.json({
             message: "Pago registrado y auditoría guardada exitosamente"
@@ -105,7 +105,7 @@ router.post("/", verifyToken, async (req, res) => {
 
     } catch (error) {
         console.error("Error en el pago:", error);
-        
+
         try {
             const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || "IP Desconocida";
             await new Log({
